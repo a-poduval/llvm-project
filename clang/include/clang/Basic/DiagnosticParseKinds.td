@@ -958,6 +958,9 @@ def err_duplicate_class_virt_specifier : Error<
 def err_duplicate_virt_specifier : Error<
   "class member already marked '%0'">;
 
+def err_virt_specifier_outside_class : Error<
+  "'%0' specifier is not allowed outside a class definition">;
+
 def err_expected_parameter_pack : Error<
   "expected the name of a parameter pack">;
 def err_paren_sizeof_parameter_pack : Error<
@@ -1116,6 +1119,9 @@ def warn_pragma_expected_integer : Warning<
 def warn_pragma_ms_struct : Warning<
   "incorrect use of '#pragma ms_struct on|off' - ignored">,
   InGroup<IgnoredPragmas>;
+def warn_pragma_ms_fenv_access : Warning<
+  "incorrect use of '#pragma fenv_access (on|off)' - ignored">,
+  InGroup<IgnoredPragmas>;
 def warn_pragma_extra_tokens_at_eol : Warning<
   "extra tokens at end of '#pragma %0' - ignored">,
   InGroup<IgnoredPragmas>;
@@ -1181,9 +1187,6 @@ def ext_stdc_pragma_ignored : ExtWarn<"unknown pragma in STDC namespace">,
 // The C standard 7.6.1p2 says "The [FENV_ACCESS] pragma shall occur either
 // outside external declarations or preceding all explicit declarations and
 // statements inside a compound statement.
-def err_pragma_stdc_fenv_access_scope : Error<
-  "'#pragma STDC FENV_ACCESS' can only appear at file scope or at the start of"
-  " a compound statement">;
 def warn_stdc_fenv_round_not_supported :
    Warning<"pragma STDC FENV_ROUND is not supported">,
    InGroup<UnknownPragmas>;
@@ -1356,8 +1359,11 @@ def err_omp_mapper_illegal_identifier : Error<
   "illegal OpenMP user-defined mapper identifier">;
 def err_omp_mapper_expected_declarator : Error<
   "expected declarator on 'omp declare mapper' directive">;
+def err_omp_unexpected_append_op : Error<
+  "unexpected operation specified in 'append_args' clause, expected 'interop'">;
 def err_omp_declare_variant_wrong_clause : Error<
-  "expected '%0' clause on 'omp declare variant' directive">;
+  "expected %select{'match'|'match', 'adjust_args', or 'append_args'}0 clause "
+  "on 'omp declare variant' directive">;
 def err_omp_declare_variant_duplicate_nested_trait : Error<
   "nested OpenMP context selector contains duplicated trait '%0'"
   " in selector '%1' and set '%2' with different score">;
@@ -1489,7 +1495,7 @@ def warn_pragma_unroll_cuda_value_in_parens : Warning<
   InGroup<CudaCompat>;
 
 def warn_cuda_attr_lambda_position : Warning<
-  "nvcc does not allow '__%0__' to appear after '()' in lambdas">,
+  "nvcc does not allow '__%0__' to appear after the parameter list in lambdas">,
   InGroup<CudaCompat>;
 def warn_pragma_force_cuda_host_device_bad_arg : Warning<
   "incorrect use of #pragma clang force_cuda_host_device begin|end">,
@@ -1497,6 +1503,15 @@ def warn_pragma_force_cuda_host_device_bad_arg : Warning<
 def err_pragma_cannot_end_force_cuda_host_device : Error<
   "force_cuda_host_device end pragma without matching "
   "force_cuda_host_device begin">;
+
+def warn_ext_int_deprecated : Warning<
+  "'_ExtInt' is deprecated; use '_BitInt' instead">, InGroup<DeprecatedType>;
+def ext_bit_int : Extension<
+  "'_BitInt' in %select{C17 and earlier|C++}0 is a Clang extension">,
+  InGroup<DiagGroup<"bit-int-extension">>;
+def warn_c17_compat_bit_int : Warning<
+  "'_BitInt' is incompatible with C standards before C2x">,
+  InGroup<CPre2xCompat>, DefaultIgnore;
 } // end of Parse Issue category.
 
 let CategoryName = "Modules Issue" in {
@@ -1542,6 +1557,9 @@ def note_meant_to_use_typename : Note<
 let CategoryName = "Coroutines Issue" in {
 def err_for_co_await_not_range_for : Error<
   "'co_await' modifier can only be applied to range-based for loop">;
+def warn_deprecated_for_co_await : Warning<
+  "'for co_await' belongs to CoroutineTS instead of C++20, which is deprecated">,
+  InGroup<DeprecatedCoroutine>;
 }
 
 let CategoryName = "Concepts Issue" in {

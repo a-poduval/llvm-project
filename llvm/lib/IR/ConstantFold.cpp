@@ -731,12 +731,16 @@ Constant *llvm::ConstantFoldShuffleVectorInstruction(Constant *V1, Constant *V2,
 
   // If the mask is all zeros this is a splat, no need to go through all
   // elements.
-  if (all_of(Mask, [](int Elt) { return Elt == 0; }) &&
-      !MaskEltCount.isScalable()) {
+  if (all_of(Mask, [](int Elt) { return Elt == 0; })) {
     Type *Ty = IntegerType::get(V1->getContext(), 32);
     Constant *Elt =
         ConstantExpr::getExtractElement(V1, ConstantInt::get(Ty, 0));
-    return ConstantVector::getSplat(MaskEltCount, Elt);
+
+    if (Elt->isNullValue()) {
+      auto *VTy = VectorType::get(EltTy, MaskEltCount);
+      return ConstantAggregateZero::get(VTy);
+    } else if (!MaskEltCount.isScalable())
+      return ConstantVector::getSplat(MaskEltCount, Elt);
   }
   // Do not iterate on scalable vector. The num of elements is unknown at
   // compile-time.
@@ -1664,8 +1668,8 @@ static ICmpInst::Predicate evaluateICmpRelation(Constant *V1, Constant *V2,
                  ++i, ++GTI)
               switch (IdxCompare(CE1->getOperand(i),
                                  CE2->getOperand(i), GTI.getIndexedType())) {
-              case -1: return isSigned ? ICmpInst::ICMP_SLT:ICmpInst::ICMP_ULT;
-              case 1:  return isSigned ? ICmpInst::ICMP_SGT:ICmpInst::ICMP_UGT;
+              case -1: return ICmpInst::ICMP_ULT;
+              case 1:  return ICmpInst::ICMP_UGT;
               case -2: return ICmpInst::BAD_ICMP_PREDICATE;
               }
 
@@ -1674,7 +1678,7 @@ static ICmpInst::Predicate evaluateICmpRelation(Constant *V1, Constant *V2,
             for (; i < CE1->getNumOperands(); ++i)
               if (!CE1->getOperand(i)->isNullValue()) {
                 if (isa<ConstantInt>(CE1->getOperand(i)))
-                  return isSigned ? ICmpInst::ICMP_SGT : ICmpInst::ICMP_UGT;
+                  return ICmpInst::ICMP_UGT;
                 else
                   return ICmpInst::BAD_ICMP_PREDICATE; // Might be equal.
               }
@@ -1682,7 +1686,7 @@ static ICmpInst::Predicate evaluateICmpRelation(Constant *V1, Constant *V2,
             for (; i < CE2->getNumOperands(); ++i)
               if (!CE2->getOperand(i)->isNullValue()) {
                 if (isa<ConstantInt>(CE2->getOperand(i)))
-                  return isSigned ? ICmpInst::ICMP_SLT : ICmpInst::ICMP_ULT;
+                  return ICmpInst::ICMP_ULT;
                 else
                   return ICmpInst::BAD_ICMP_PREDICATE; // Might be equal.
               }
@@ -1792,62 +1796,13 @@ Constant *llvm::ConstantFoldCompareInstruction(unsigned short pred,
   if (isa<ConstantInt>(C1) && isa<ConstantInt>(C2)) {
     const APInt &V1 = cast<ConstantInt>(C1)->getValue();
     const APInt &V2 = cast<ConstantInt>(C2)->getValue();
-    switch (pred) {
-    default: llvm_unreachable("Invalid ICmp Predicate");
-    case ICmpInst::ICMP_EQ:  return ConstantInt::get(ResultTy, V1 == V2);
-    case ICmpInst::ICMP_NE:  return ConstantInt::get(ResultTy, V1 != V2);
-    case ICmpInst::ICMP_SLT: return ConstantInt::get(ResultTy, V1.slt(V2));
-    case ICmpInst::ICMP_SGT: return ConstantInt::get(ResultTy, V1.sgt(V2));
-    case ICmpInst::ICMP_SLE: return ConstantInt::get(ResultTy, V1.sle(V2));
-    case ICmpInst::ICMP_SGE: return ConstantInt::get(ResultTy, V1.sge(V2));
-    case ICmpInst::ICMP_ULT: return ConstantInt::get(ResultTy, V1.ult(V2));
-    case ICmpInst::ICMP_UGT: return ConstantInt::get(ResultTy, V1.ugt(V2));
-    case ICmpInst::ICMP_ULE: return ConstantInt::get(ResultTy, V1.ule(V2));
-    case ICmpInst::ICMP_UGE: return ConstantInt::get(ResultTy, V1.uge(V2));
-    }
+    return ConstantInt::get(
+        ResultTy, ICmpInst::compare(V1, V2, (ICmpInst::Predicate)pred));
   } else if (isa<ConstantFP>(C1) && isa<ConstantFP>(C2)) {
     const APFloat &C1V = cast<ConstantFP>(C1)->getValueAPF();
     const APFloat &C2V = cast<ConstantFP>(C2)->getValueAPF();
-    APFloat::cmpResult R = C1V.compare(C2V);
-    switch (pred) {
-    default: llvm_unreachable("Invalid FCmp Predicate");
-    case FCmpInst::FCMP_FALSE: return Constant::getNullValue(ResultTy);
-    case FCmpInst::FCMP_TRUE:  return Constant::getAllOnesValue(ResultTy);
-    case FCmpInst::FCMP_UNO:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpUnordered);
-    case FCmpInst::FCMP_ORD:
-      return ConstantInt::get(ResultTy, R!=APFloat::cmpUnordered);
-    case FCmpInst::FCMP_UEQ:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpUnordered ||
-                                        R==APFloat::cmpEqual);
-    case FCmpInst::FCMP_OEQ:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpEqual);
-    case FCmpInst::FCMP_UNE:
-      return ConstantInt::get(ResultTy, R!=APFloat::cmpEqual);
-    case FCmpInst::FCMP_ONE:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpLessThan ||
-                                        R==APFloat::cmpGreaterThan);
-    case FCmpInst::FCMP_ULT:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpUnordered ||
-                                        R==APFloat::cmpLessThan);
-    case FCmpInst::FCMP_OLT:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpLessThan);
-    case FCmpInst::FCMP_UGT:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpUnordered ||
-                                        R==APFloat::cmpGreaterThan);
-    case FCmpInst::FCMP_OGT:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpGreaterThan);
-    case FCmpInst::FCMP_ULE:
-      return ConstantInt::get(ResultTy, R!=APFloat::cmpGreaterThan);
-    case FCmpInst::FCMP_OLE:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpLessThan ||
-                                        R==APFloat::cmpEqual);
-    case FCmpInst::FCMP_UGE:
-      return ConstantInt::get(ResultTy, R!=APFloat::cmpLessThan);
-    case FCmpInst::FCMP_OGE:
-      return ConstantInt::get(ResultTy, R==APFloat::cmpGreaterThan ||
-                                        R==APFloat::cmpEqual);
-    }
+    CmpInst::Predicate Predicate = CmpInst::Predicate(pred);
+    return ConstantInt::get(ResultTy, FCmpInst::compare(C1V, C2V, Predicate));
   } else if (auto *C1VTy = dyn_cast<VectorType>(C1->getType())) {
 
     // Fast path for splatted constants.
@@ -2222,9 +2177,8 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
 
   if (C->isNullValue()) {
     bool isNull = true;
-    for (unsigned i = 0, e = Idxs.size(); i != e; ++i)
-      if (!isa<UndefValue>(Idxs[i]) &&
-          !cast<Constant>(Idxs[i])->isNullValue()) {
+    for (Value *Idx : Idxs)
+      if (!isa<UndefValue>(Idx) && !cast<Constant>(Idx)->isNullValue()) {
         isNull = false;
         break;
       }
@@ -2240,8 +2194,8 @@ Constant *llvm::ConstantFoldGetElementPtr(Type *PointeeTy, Constant *C,
 
       // The GEP returns a vector of pointers when one of more of
       // its arguments is a vector.
-      for (unsigned i = 0, e = Idxs.size(); i != e; ++i) {
-        if (auto *VT = dyn_cast<VectorType>(Idxs[i]->getType())) {
+      for (Value *Idx : Idxs) {
+        if (auto *VT = dyn_cast<VectorType>(Idx->getType())) {
           assert((!isa<VectorType>(GEPTy) || isa<ScalableVectorType>(GEPTy) ==
                                                  isa<ScalableVectorType>(VT)) &&
                  "Mismatched GEPTy vector types");

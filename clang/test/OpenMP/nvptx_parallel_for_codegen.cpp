@@ -469,10 +469,10 @@ int bar(int n){
 // CHECK-NEXT:    [[EXEC_USER_CODE:%.*]] = icmp eq i32 [[TMP1]], -1
 // CHECK-NEXT:    br i1 [[EXEC_USER_CODE]], label [[USER_CODE_ENTRY:%.*]], label [[WORKER_EXIT:%.*]]
 // CHECK:       user_code.entry:
-// CHECK-NEXT:    [[D:%.*]] = call i8* @__kmpc_alloc_shared(i64 4)
+// CHECK-NEXT:    [[D:%.*]] = call align 8 i8* @__kmpc_alloc_shared(i64 4)
 // CHECK-NEXT:    [[D_ON_STACK:%.*]] = bitcast i8* [[D]] to i32*
 // CHECK-NEXT:    [[TMP2:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @[[GLOB1]])
-// CHECK-NEXT:    [[TMP3:%.*]] = load i32, i32* [[CONV]], align 8
+// CHECK-NEXT:    [[TMP3:%.*]] = load i32, i32* [[CONV]], align 4
 // CHECK-NEXT:    store i32 [[TMP3]], i32* [[D_ON_STACK]], align 4
 // CHECK-NEXT:    [[TMP4:%.*]] = getelementptr inbounds [2 x i8*], [2 x i8*]* [[CAPTURED_VARS_ADDRS]], i64 0, i64 0
 // CHECK-NEXT:    [[TMP5:%.*]] = bitcast [10 x i32]* [[TMP0]] to i8*
@@ -590,9 +590,9 @@ int bar(int n){
 // CHECK-NEXT:    [[DOTADDR1:%.*]] = alloca i32, align 4
 // CHECK-NEXT:    [[DOTZERO_ADDR:%.*]] = alloca i32, align 4
 // CHECK-NEXT:    [[GLOBAL_ARGS:%.*]] = alloca i8**, align 8
-// CHECK-NEXT:    store i32 0, i32* [[DOTZERO_ADDR]], align 4
 // CHECK-NEXT:    store i16 [[TMP0]], i16* [[DOTADDR]], align 2
 // CHECK-NEXT:    store i32 [[TMP1]], i32* [[DOTADDR1]], align 4
+// CHECK-NEXT:    store i32 0, i32* [[DOTZERO_ADDR]], align 4
 // CHECK-NEXT:    call void @__kmpc_get_shared_variables(i8*** [[GLOBAL_ARGS]])
 // CHECK-NEXT:    [[TMP2:%.*]] = load i8**, i8*** [[GLOBAL_ARGS]], align 8
 // CHECK-NEXT:    [[TMP3:%.*]] = getelementptr inbounds i8*, i8** [[TMP2]], i64 0

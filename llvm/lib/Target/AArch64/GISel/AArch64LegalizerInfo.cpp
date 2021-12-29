@@ -721,7 +721,8 @@ AArch64LegalizerInfo::AArch64LegalizerInfo(const AArch64Subtarget &ST)
       .clampMaxNumElements(1, s32, 4)
       .lower();
 
-  getActionDefinitionsBuilder({G_VECREDUCE_OR, G_VECREDUCE_AND})
+  getActionDefinitionsBuilder(
+      {G_VECREDUCE_OR, G_VECREDUCE_AND, G_VECREDUCE_XOR})
       // Try to break down into smaller vectors as long as they're at least 64
       // bits. This lets us use vector operations for some parts of the
       // reduction.
@@ -782,6 +783,11 @@ AArch64LegalizerInfo::AArch64LegalizerInfo(const AArch64Subtarget &ST)
   getActionDefinitionsBuilder({G_FMAXNUM, G_FMINNUM})
       .legalFor({MinFPScalar, s32, s64})
       .libcallFor({s128})
+      .minScalar(0, MinFPScalar);
+
+  // TODO: Vector types.
+  getActionDefinitionsBuilder({G_FMAXIMUM, G_FMINIMUM})
+      .legalFor({MinFPScalar, s32, s64})
       .minScalar(0, MinFPScalar);
 
   // TODO: Libcall support for s128.

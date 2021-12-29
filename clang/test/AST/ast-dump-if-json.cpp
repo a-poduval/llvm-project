@@ -38,6 +38,7 @@ void func(int val) {
 // using --filters=IfStmt
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {
@@ -150,6 +151,7 @@ void func(int val) {
 // CHECK-NEXT: }
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {
@@ -280,6 +282,7 @@ void func(int val) {
 // CHECK-NEXT: }
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {
@@ -523,6 +526,7 @@ void func(int val) {
 // CHECK-NEXT: }
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {
@@ -650,6 +654,7 @@ void func(int val) {
 // CHECK-NEXT: }
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {
@@ -706,7 +711,6 @@ void func(int val) {
 // CHECK-NEXT:      },
 // CHECK-NEXT:      "isUsed": true,
 // CHECK-NEXT:      "name": "i",
-// CHECK-NEXT:      "mangledName": "_ZZ4funciE1i",
 // CHECK-NEXT:      "type": {
 // CHECK-NEXT:       "qualType": "int"
 // CHECK-NEXT:      },
@@ -832,6 +836,7 @@ void func(int val) {
 // CHECK-NEXT: }
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {
@@ -888,7 +893,6 @@ void func(int val) {
 // CHECK-NEXT:      },
 // CHECK-NEXT:      "isUsed": true,
 // CHECK-NEXT:      "name": "i",
-// CHECK-NEXT:      "mangledName": "_ZZ4funciE1i_0",
 // CHECK-NEXT:      "type": {
 // CHECK-NEXT:       "qualType": "int"
 // CHECK-NEXT:      },
@@ -1014,6 +1018,7 @@ void func(int val) {
 // CHECK-NEXT: }
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {
@@ -1050,6 +1055,7 @@ void func(int val) {
 // CHECK-NEXT: }
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {
@@ -1103,6 +1109,7 @@ void func(int val) {
 // CHECK-NEXT: }
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {
@@ -1140,6 +1147,7 @@ void func(int val) {
 // CHECK-NEXT: }
 
 
+// CHECK-NOT: {{^}}Dumping
 // CHECK:  "kind": "IfStmt",
 // CHECK-NEXT:  "range": {
 // CHECK-NEXT:   "begin": {

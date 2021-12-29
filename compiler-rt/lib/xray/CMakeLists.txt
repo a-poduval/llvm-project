@@ -81,6 +81,10 @@ set(riscv32_SOURCES
 set(riscv64_SOURCES
   xray_riscv64.cpp
   xray_trampoline_riscv64.S
+
+set(hexagon_SOURCES
+  xray_hexagon.cpp
+  xray_trampoline_hexagon.S
   )
 
 set(XRAY_IMPL_HEADERS
@@ -121,6 +125,7 @@ set(XRAY_ALL_SOURCE_FILES
   ${x86_64_SOURCES}
   ${arm_SOURCES}
   ${armhf_SOURCES}
+  ${hexagon_SOURCES}
   ${mips_SOURCES}
   ${mipsel_SOURCES}
   ${mips64_SOURCES}

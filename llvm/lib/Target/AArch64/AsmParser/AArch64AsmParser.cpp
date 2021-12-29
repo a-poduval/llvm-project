@@ -1031,12 +1031,7 @@ public:
     if (DarwinRefKind != MCSymbolRefExpr::VK_None)
       return false;
 
-    for (unsigned i = 0; i != AllowedModifiers.size(); ++i) {
-      if (ELFRefKind == AllowedModifiers[i])
-        return true;
-    }
-
-    return false;
+    return llvm::is_contained(AllowedModifiers, ELFRefKind);
   }
 
   bool isMovWSymbolG3() const {
@@ -1511,7 +1506,7 @@ public:
   }
 
   bool isAdrpLabel() const {
-    // Validation was handled during parsing, so we just sanity check that
+    // Validation was handled during parsing, so we just verify that
     // something didn't go haywire.
     if (!isImm())
         return false;
@@ -1527,7 +1522,7 @@ public:
   }
 
   bool isAdrLabel() const {
-    // Validation was handled during parsing, so we just sanity check that
+    // Validation was handled during parsing, so we just verify that
     // something didn't go haywire.
     if (!isImm())
         return false;
@@ -3296,6 +3291,8 @@ static const struct Extension {
 };
 
 static void setRequiredFeatureString(FeatureBitset FBS, std::string &Str) {
+  if (FBS[AArch64::HasV8_0aOps])
+    Str += "ARMv8a";
   if (FBS[AArch64::HasV8_1aOps])
     Str += "ARMv8.1a";
   else if (FBS[AArch64::HasV8_2aOps])
@@ -3310,6 +3307,14 @@ static void setRequiredFeatureString(FeatureBitset FBS, std::string &Str) {
     Str += "ARMv8.6a";
   else if (FBS[AArch64::HasV8_7aOps])
     Str += "ARMv8.7a";
+  else if (FBS[AArch64::HasV9_0aOps])
+    Str += "ARMv9-a";
+  else if (FBS[AArch64::HasV9_1aOps])
+    Str += "ARMv9.1a";
+  else if (FBS[AArch64::HasV9_2aOps])
+    Str += "ARMv9.2a";
+  else if (FBS[AArch64::HasV8_0rOps])
+    Str += "ARMv8r";
   else {
     SmallVector<std::string, 2> ExtMatches;
     for (const auto& Ext : ExtensionMap) {
@@ -3345,7 +3350,7 @@ void AArch64AsmParser::createSysAlias(uint16_t Encoding, OperandVector &Operands
 /// the SYS instruction. Parse them specially so that we create a SYS MCInst.
 bool AArch64AsmParser::parseSysAlias(StringRef Name, SMLoc NameLoc,
                                    OperandVector &Operands) {
-  if (Name.find('.') != StringRef::npos)
+  if (Name.contains('.'))
     return TokError("invalid operand");
 
   Mnemonic = Name;
@@ -5926,6 +5931,9 @@ static void ExpandCryptoAEK(AArch64::ArchKind ArchKind,
     case AArch64::ArchKind::ARMV8_5A:
     case AArch64::ArchKind::ARMV8_6A:
     case AArch64::ArchKind::ARMV8_7A:
+    case AArch64::ArchKind::ARMV9A:
+    case AArch64::ArchKind::ARMV9_1A:
+    case AArch64::ArchKind::ARMV9_2A:
     case AArch64::ArchKind::ARMV8R:
       RequestedExtensions.push_back("sm4");
       RequestedExtensions.push_back("sha3");
@@ -5948,6 +5956,9 @@ static void ExpandCryptoAEK(AArch64::ArchKind ArchKind,
     case AArch64::ArchKind::ARMV8_5A:
     case AArch64::ArchKind::ARMV8_6A:
     case AArch64::ArchKind::ARMV8_7A:
+    case AArch64::ArchKind::ARMV9A:
+    case AArch64::ArchKind::ARMV9_1A:
+    case AArch64::ArchKind::ARMV9_2A:
       RequestedExtensions.push_back("nosm4");
       RequestedExtensions.push_back("nosha3");
       RequestedExtensions.push_back("nosha2");

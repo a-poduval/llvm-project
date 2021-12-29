@@ -107,6 +107,7 @@ namespace {
     using BBVRegPair = std::pair<unsigned, Register>;
     using VRegPHIUse = DenseMap<BBVRegPair, unsigned>;
 
+    // Count the number of non-undef PHI uses of each register in each BB.
     VRegPHIUse VRegPHIUseCount;
 
     // Defs of PHI sources which are implicit_def.
@@ -212,7 +213,7 @@ bool PHIElimination::runOnMachineFunction(MachineFunction &MF) {
   for (auto &I : LoweredPHIs) {
     if (LIS)
       LIS->RemoveMachineInstrFromMaps(*I.first);
-    MF.DeleteMachineInstr(I.first);
+    MF.deleteMachineInstr(I.first);
   }
 
   // TODO: we should use the incremental DomTree updater here.
@@ -426,9 +427,13 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
   }
 
   // Adjust the VRegPHIUseCount map to account for the removal of this PHI node.
-  for (unsigned i = 1; i != MPhi->getNumOperands(); i += 2)
-    --VRegPHIUseCount[BBVRegPair(MPhi->getOperand(i+1).getMBB()->getNumber(),
-                                 MPhi->getOperand(i).getReg())];
+  for (unsigned i = 1; i != MPhi->getNumOperands(); i += 2) {
+    if (!MPhi->getOperand(i).isUndef()) {
+      --VRegPHIUseCount[BBVRegPair(
+          MPhi->getOperand(i + 1).getMBB()->getNumber(),
+          MPhi->getOperand(i).getReg())];
+    }
+  }
 
   // Now loop over all of the incoming arguments, changing them to copy into the
   // IncomingReg register in the corresponding predecessor basic block.
@@ -621,7 +626,7 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
   if (reusedIncoming || !IncomingReg) {
     if (LIS)
       LIS->RemoveMachineInstrFromMaps(*MPhi);
-    MF.DeleteMachineInstr(MPhi);
+    MF.deleteMachineInstr(MPhi);
   }
 }
 
@@ -630,14 +635,19 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
 /// used in a PHI node. We map that to the BB the vreg is coming from. This is
 /// used later to determine when the vreg is killed in the BB.
 void PHIElimination::analyzePHINodes(const MachineFunction& MF) {
-  for (const auto &MBB : MF)
+  for (const auto &MBB : MF) {
     for (const auto &BBI : MBB) {
       if (!BBI.isPHI())
         break;
-      for (unsigned i = 1, e = BBI.getNumOperands(); i != e; i += 2)
-        ++VRegPHIUseCount[BBVRegPair(BBI.getOperand(i+1).getMBB()->getNumber(),
-                                     BBI.getOperand(i).getReg())];
+      for (unsigned i = 1, e = BBI.getNumOperands(); i != e; i += 2) {
+        if (!BBI.getOperand(i).isUndef()) {
+          ++VRegPHIUseCount[BBVRegPair(
+              BBI.getOperand(i + 1).getMBB()->getNumber(),
+              BBI.getOperand(i).getReg())];
+        }
+      }
     }
+  }
 }
 
 bool PHIElimination::SplitPHIEdges(MachineFunction &MF,

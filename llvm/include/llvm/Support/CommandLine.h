@@ -316,9 +316,7 @@ public:
   }
 
   bool isInAllSubCommands() const {
-    return any_of(Subs, [](const SubCommand *SC) {
-      return SC == &*AllSubCommands;
-    });
+    return llvm::is_contained(Subs, &*AllSubCommands);
   }
 
   //-------------------------------------------------------------------------===
@@ -1552,8 +1550,9 @@ public:
   }
 
   template <class T> void addValue(const T &V) {
-    assert(Location != 0 && "cl::location(...) not specified for a command "
-                            "line option with external storage!");
+    assert(Location != nullptr &&
+           "cl::location(...) not specified for a command "
+           "line option with external storage!");
     Location->push_back(V);
   }
 };
@@ -1756,8 +1755,9 @@ public:
   }
 
   template <class T> void addValue(const T &V) {
-    assert(Location != 0 && "cl::location(...) not specified for a command "
-                            "line option with external storage!");
+    assert(Location != nullptr &&
+           "cl::location(...) not specified for a command "
+           "line option with external storage!");
     *Location |= Bit(V);
   }
 

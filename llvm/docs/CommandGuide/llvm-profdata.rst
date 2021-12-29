@@ -94,13 +94,13 @@ OPTIONS
 .. option:: -sample
 
  Specify that the input profile is a sample-based profile.
- 
+
  The format of the generated file can be generated in one of three ways:
 
  .. option:: -binary (default)
 
  Emit the profile using a binary encoding. For instrumentation-based profile
- the output format is the indexed binary format. 
+ the output format is the indexed binary format.
 
  .. option:: -extbinary
 
@@ -185,6 +185,13 @@ OPTIONS
  inlined by PGO early inliner and it will not be adjusted based on sample
  profile.
 
+.. option:: -debug-info=path
+
+ Specify the executable or ``.dSYM`` that contains debug info for the raw profile.
+ When ``-debug-info-correlate`` was used for instrumentation, use this option
+ to correlate the raw profile.
+
+
 EXAMPLES
 ^^^^^^^^
 Basic Usage
@@ -197,7 +204,7 @@ Merge three profiles:
 
 Weighted Input
 ++++++++++++++
-The input file `foo.profdata` is especially important, multiply its counts by 10:
+The input file ``foo.profdata`` is especially important, multiply its counts by 10:
 
 ::
 

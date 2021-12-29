@@ -162,6 +162,64 @@ define <2 x i8> @lshr_exact_splat_vec(<2 x i8> %x) {
   ret <2 x i8> %lshr
 }
 
+define i8 @shl_add(i8 %x, i8 %y) {
+; CHECK-LABEL: @shl_add(
+; CHECK-NEXT:    [[L:%.*]] = shl i8 [[X:%.*]], 2
+; CHECK-NEXT:    [[A:%.*]] = add i8 [[L]], [[Y:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = lshr i8 [[A]], 2
+; CHECK-NEXT:    ret i8 [[R]]
+;
+  %l = shl i8 %x, 2
+  %a = add i8 %l, %y
+  %r = lshr i8 %a, 2
+  ret i8 %r
+}
+
+define <2 x i8> @shl_add_commute_vec(<2 x i8> %x, <2 x i8> %py) {
+; CHECK-LABEL: @shl_add_commute_vec(
+; CHECK-NEXT:    [[Y:%.*]] = mul <2 x i8> [[PY:%.*]], [[PY]]
+; CHECK-NEXT:    [[L:%.*]] = shl <2 x i8> [[X:%.*]], <i8 3, i8 3>
+; CHECK-NEXT:    [[A:%.*]] = add <2 x i8> [[Y]], [[L]]
+; CHECK-NEXT:    [[R:%.*]] = lshr <2 x i8> [[A]], <i8 3, i8 3>
+; CHECK-NEXT:    ret <2 x i8> [[R]]
+;
+  %y = mul <2 x i8> %py, %py ; thwart complexity-based canonicalization
+  %l = shl <2 x i8> %x, <i8 3, i8 3>
+  %a = add <2 x i8> %y, %l
+  %r = lshr <2 x i8> %a, <i8 3, i8 3>
+  ret <2 x i8> %r
+}
+
+define i32 @shl_add_use1(i32 %x, i32 %y) {
+; CHECK-LABEL: @shl_add_use1(
+; CHECK-NEXT:    [[L:%.*]] = shl i32 [[X:%.*]], 2
+; CHECK-NEXT:    call void @use(i32 [[L]])
+; CHECK-NEXT:    [[A:%.*]] = add i32 [[L]], [[Y:%.*]]
+; CHECK-NEXT:    [[R:%.*]] = lshr i32 [[A]], 2
+; CHECK-NEXT:    ret i32 [[R]]
+;
+  %l = shl i32 %x, 2
+  call void @use(i32 %l)
+  %a = add i32 %l, %y
+  %r = lshr i32 %a, 2
+  ret i32 %r
+}
+
+define i32 @shl_add_use2(i32 %x, i32 %y) {
+; CHECK-LABEL: @shl_add_use2(
+; CHECK-NEXT:    [[L:%.*]] = shl i32 [[X:%.*]], 2
+; CHECK-NEXT:    [[A:%.*]] = add i32 [[L]], [[Y:%.*]]
+; CHECK-NEXT:    call void @use(i32 [[A]])
+; CHECK-NEXT:    [[R:%.*]] = lshr i32 [[A]], 2
+; CHECK-NEXT:    ret i32 [[R]]
+;
+  %l = shl i32 %x, 2
+  %a = add i32 %l, %y
+  call void @use(i32 %a)
+  %r = lshr i32 %a, 2
+  ret i32 %r
+}
+
 define i16 @bool_zext(i1 %x) {
 ; CHECK-LABEL: @bool_zext(
 ; CHECK-NEXT:    [[HIBIT:%.*]] = zext i1 [[X:%.*]] to i16
@@ -616,4 +674,50 @@ define i12 @trunc_sandwich_big_sum_shift2_use1(i32 %x) {
   %tr = trunc i32 %sh to i12
   %r = lshr i12 %tr, 1
   ret i12 %r
+}
+
+define i16 @lshr_sext_i1_to_i16(i1 %a) {
+; CHECK-LABEL: @lshr_sext_i1_to_i16(
+; CHECK-NEXT:    [[LSHR:%.*]] = select i1 [[A:%.*]], i16 4095, i16 0
+; CHECK-NEXT:    ret i16 [[LSHR]]
+;
+  %sext = sext i1 %a to i16
+  %lshr = lshr i16 %sext, 4
+  ret i16 %lshr
+}
+
+define i128 @lshr_sext_i1_to_i128(i1 %a) {
+; CHECK-LABEL: @lshr_sext_i1_to_i128(
+; CHECK-NEXT:    [[LSHR:%.*]] = select i1 [[A:%.*]], i128 77371252455336267181195263, i128 0
+; CHECK-NEXT:    ret i128 [[LSHR]]
+;
+  %sext = sext i1 %a to i128
+  %lshr = lshr i128 %sext, 42
+  ret i128 %lshr
+}
+
+define i32 @lshr_sext_i1_to_i32_use(i1 %a) {
+; CHECK-LABEL: @lshr_sext_i1_to_i32_use(
+; CHECK-NEXT:    [[SEXT:%.*]] = sext i1 [[A:%.*]] to i32
+; CHECK-NEXT:    call void @use(i32 [[SEXT]])
+; CHECK-NEXT:    [[LSHR:%.*]] = select i1 [[A]], i32 262143, i32 0
+; CHECK-NEXT:    ret i32 [[LSHR]]
+;
+  %sext = sext i1 %a to i32
+  call void @use(i32 %sext)
+  %lshr = lshr i32 %sext, 14
+  ret i32 %lshr
+}
+
+define <3 x i14> @lshr_sext_i1_to_i14_splat_vec_use1(<3 x i1> %a) {
+; CHECK-LABEL: @lshr_sext_i1_to_i14_splat_vec_use1(
+; CHECK-NEXT:    [[SEXT:%.*]] = sext <3 x i1> [[A:%.*]] to <3 x i14>
+; CHECK-NEXT:    call void @usevec(<3 x i14> [[SEXT]])
+; CHECK-NEXT:    [[LSHR:%.*]] = select <3 x i1> [[A]], <3 x i14> <i14 1023, i14 1023, i14 1023>, <3 x i14> zeroinitializer
+; CHECK-NEXT:    ret <3 x i14> [[LSHR]]
+;
+  %sext = sext <3 x i1> %a to <3 x i14>
+  call void @usevec(<3 x i14> %sext)
+  %lshr = lshr <3 x i14> %sext, <i14 4, i14 4, i14 4>
+  ret <3 x i14> %lshr
 }

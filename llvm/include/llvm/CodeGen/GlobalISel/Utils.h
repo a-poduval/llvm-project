@@ -47,6 +47,7 @@ class TargetRegisterClass;
 class ConstantInt;
 class ConstantFP;
 class APFloat;
+class MachineIRBuilder;
 
 // Convenience macros for dealing with vector reduction opcodes.
 #define GISEL_VECREDUCE_CASES_ALL                                              \
@@ -266,6 +267,14 @@ Optional<APFloat> ConstantFoldFPBinOp(unsigned Opcode, const Register Op1,
                                       const Register Op2,
                                       const MachineRegisterInfo &MRI);
 
+/// Tries to constant fold a vector binop with sources \p Op1 and \p Op2.
+/// If successful, returns the G_BUILD_VECTOR representing the folded vector
+/// constant. \p MIB should have an insertion point already set to create new
+/// G_CONSTANT instructions as needed.
+Optional<MachineInstr *>
+ConstantFoldVectorBinop(unsigned Opcode, const Register Op1, const Register Op2,
+                        const MachineRegisterInfo &MRI, MachineIRBuilder &MIB);
+
 Optional<APInt> ConstantFoldExtOp(unsigned Opcode, const Register Op1,
                                   uint64_t Imm, const MachineRegisterInfo &MRI);
 
@@ -313,6 +322,11 @@ Register getFunctionLiveInPhysReg(MachineFunction &MF, const TargetInstrInfo &TI
 /// \p OrigTy elements, and unmerged into \p TargetTy
 LLVM_READNONE
 LLT getLCMType(LLT OrigTy, LLT TargetTy);
+
+LLVM_READNONE
+/// Return smallest type that covers both \p OrigTy and \p TargetTy and is
+/// multiple of TargetTy.
+LLT getCoverTy(LLT OrigTy, LLT TargetTy);
 
 /// Return a type where the total size is the greatest common divisor of \p
 /// OrigTy and \p TargetTy. This will try to either change the number of vector
@@ -368,6 +382,18 @@ Optional<int64_t> getBuildVectorConstantSplat(const MachineInstr &MI,
 Optional<FPValueAndVReg> getFConstantSplat(Register VReg,
                                            const MachineRegisterInfo &MRI,
                                            bool AllowUndef = true);
+
+/// Return true if the specified register is defined by G_BUILD_VECTOR or
+/// G_BUILD_VECTOR_TRUNC where all of the elements are \p SplatValue or undef.
+bool isBuildVectorConstantSplat(const Register Reg,
+                                const MachineRegisterInfo &MRI,
+                                int64_t SplatValue, bool AllowUndef);
+
+/// Return true if the specified instruction is a G_BUILD_VECTOR or
+/// G_BUILD_VECTOR_TRUNC where all of the elements are \p SplatValue or undef.
+bool isBuildVectorConstantSplat(const MachineInstr &MI,
+                                const MachineRegisterInfo &MRI,
+                                int64_t SplatValue, bool AllowUndef);
 
 /// Return true if the specified instruction is a G_BUILD_VECTOR or
 /// G_BUILD_VECTOR_TRUNC where all of the elements are 0 or undef.
