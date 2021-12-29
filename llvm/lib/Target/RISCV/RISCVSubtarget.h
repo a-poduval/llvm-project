@@ -134,6 +134,10 @@ public:
   unsigned getMaxInterleaveFactor() const {
     return hasStdExtV() ? MaxInterleaveFactor : 1;
   }
+  // Add XRay support
+  bool isXRaySupported() const override { 
+    return true; 
+  }
 
 protected:
   // GlobalISel related APIs.

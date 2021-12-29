@@ -35,7 +35,8 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
   if (!Args.hasFlag(options::OPT_fxray_instrument,
                     options::OPT_fno_xray_instrument, false))
     return;
-  if (Triple.getOS() == llvm::Triple::Linux) {
+  //if (Triple.getOS() == llvm::Triple::Linux) {
+  if (Triple.getOS() == llvm::Triple::Linux || Triple.getOS() == llvm::Triple::UnknownOS) {
     switch (Triple.getArch()) {
     case llvm::Triple::x86_64:
     case llvm::Triple::arm:
@@ -45,6 +46,8 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
     case llvm::Triple::mipsel:
     case llvm::Triple::mips64:
     case llvm::Triple::mips64el:
+    case llvm::Triple::riscv32:
+    case llvm::Triple::riscv64:
       break;
     default:
       D.Diag(diag::err_drv_clang_unsupported)

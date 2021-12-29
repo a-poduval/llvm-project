@@ -73,6 +73,16 @@ set(powerpc64le_SOURCES
   xray_trampoline_powerpc64_asm.S
   )
 
+set(riscv32_SOURCES
+  xray_riscv32.cpp
+  xray_trampoline_riscv32.S
+  )
+
+set(riscv64_SOURCES
+  xray_riscv64.cpp
+  xray_trampoline_riscv64.S
+  )
+
 set(XRAY_IMPL_HEADERS
   xray_allocator.h
   xray_basic_flags.h
@@ -116,6 +126,8 @@ set(XRAY_ALL_SOURCE_FILES
   ${mips64_SOURCES}
   ${mips64el_SOURCES}
   ${powerpc64le_SOURCES}
+  ${riscv32_SOURCES}
+  ${riscv64_SOURCES}
   ${XRAY_IMPL_HEADERS}
   )
 list(REMOVE_DUPLICATES XRAY_ALL_SOURCE_FILES)
