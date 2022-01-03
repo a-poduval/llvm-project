@@ -18,6 +18,19 @@
 
 namespace __xray {
 
+// The machine codes for some instructions used in runtime patching.
+enum PatchOpcodes : uint32_t {
+  PO_ADDI = 0x00000013,   // addi rd, rs1, imm
+  PO_SW = 0x00002023,     // sw rt, base(offset)
+  PO_LUI = 0x00000037,    // lui rd, imm
+  PO_ORI = 0x00000013,    // ori rd, rs1, imm
+  PO_DSLL = 0x00001033,   // sll rd, rt, sa
+  PO_JALR = 0x00000067,   // jalr rs
+  PO_LW = 0x00002003,     // lw rd, base(offset)
+  PO_B60 = 0x0000006f,    // jal #n_bytes
+  PO_NOP = 0x00000013,    // nop - pseduo-instruction, same as addi r0, r0, 0
+};
+
 inline static bool patchSled(const bool Enable, const uint32_t FuncId,
                              const XRaySledEntry &Sled,
                              void (*TracingHook)()) XRAY_NEVER_INSTRUMENT {

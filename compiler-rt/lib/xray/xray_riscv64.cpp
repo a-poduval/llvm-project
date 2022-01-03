@@ -20,34 +20,63 @@ namespace __xray {
 
 // The machine codes for some instructions used in runtime patching.
 enum PatchOpcodes : uint32_t {
-  PO_ADDI = 0x00000013,   // addi rd, rs1, imm
-  PO_SD = 0x00003023,     // sd rt, base(offset)
-  PO_LUI = 0x00000037,    // lui rd, imm
-  PO_ORI = 0x00000013,    // ori rd, rs1, imm
-  PO_DSLL = 0x00001033,   // sll rd, rt, sa
-  PO_JALR = 0x00000067,   // jalr rs
-  PO_LD = 0x00003003,     // ld rd, base(offset)
-  PO_B60 = 0x0000006f,    // jal #n_bytes
-  PO_NOP = 0x00000013,    // nop - pseduo-instruction, same as addi r0, r0, 0
+  PO_ADDI =  0x00000013,    // addi rd, rs1, imm
+  PO_ADD =   0x00000033,    // add rd, rs1, rs2
+  PO_SD =    0x00003023,    // sd rt, base(offset)
+  PO_LUI =   0x00000037,    // lui rd, imm
+  PO_ORI =   0x00006013,    // ori rd, rs1, imm
+  PO_OR =    0x00006033,    // or rd, rs1, rs2
+  PO_DSLLI = 0x00001013,    // slli rd, rs, shamt
+  PO_DSRLI = 0x00005013,    // srli rd, rs, shamt
+  PO_JALR =  0x00000067,    // jalr rs
+  PO_LD =    0x00003003,    // ld rd, base(offset)
+  PO_B =     0x0000006f,    // jal #n_bytes
+  PO_NOP =   0x00000013,    // nop - pseduo-instruction, same as addi r0, r0, 0
 };
 
 enum RegNum : uint32_t {
-  RN_T0 = 0xC,
-  RN_T9 = 0x19,
-  RN_RA = 0x1F,
-  RN_SP = 0x1D,
+  RN_R0 = 0x0,
+  RN_RA = 0x1,
+  RN_SP = 0x2,
+  RN_T0 = 0x5,
+  RN_T1 = 0x6,
+  RN_T2 = 0x7,
 };
 
-inline static uint32_t encodeInstruction(uint32_t Opcode, uint32_t Rs,
-                                         uint32_t Rt,
+inline static uint32_t
+encodeRTypeInstruction(uint32_t Opcode, uint32_t Rs1, uint32_t Rs2,
+                         uint32_t Rd) XRAY_NEVER_INSTRUMENT {
+  return (Rs << 20 | Rt << 15 | Rd << 7 | Opcode);
+}
+
+inline static uint32_t encodeITypeInstruction(uint32_t Opcode, uint32_t Rs1,
+                                         uint32_t Rd,
                                          uint32_t Imm) XRAY_NEVER_INSTRUMENT {
-  return (Opcode | Rs << 21 | Rt << 16 | Imm);
+  return (Imm << 20 | Rs1 << 15 | Rd << 7 | Opcode);
 }
 
 inline static uint32_t
-encodeSpecialInstruction(uint32_t Opcode, uint32_t Rs, uint32_t Rt, uint32_t Rd,
+encodeSTypeInstruction(uint32_t Opcode, uint32_t Rs1, uint32_t Rs2,
                          uint32_t Imm) XRAY_NEVER_INSTRUMENT {
-  return (Rs << 21 | Rt << 16 | Rd << 11 | Imm << 6 | Opcode);
+  uint32_t imm_msbs = (Imm & 0xfe0) << 25;
+  uint32_t imm_lsbs = (Imm & 0x01f) << 7;
+  return (imm_msbs | Rs1 << 20 | Rs2 << 15 | imm_lsbs | Opcode);
+}
+
+inline static uint32_t encodeUTypeInstruction(uint32_t Opcode, 
+                                         uint32_t Rd,
+                                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
+  return (Imm << 12 | Rd << 7 | Opcode);
+}
+
+inline static uint32_t encodeJTypeInstruction(uint32_t Opcode, 
+                                         uint32_t Rd,
+                                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
+  uint32_t imm_msb = (Imm & 0x80000) << 31;
+  uint32_t imm_lsbs = (Imm & 0x003ff) << 21;
+  uint32_t imm_11 = (Imm & 0x00400) << 20;
+  uint32_t imm_1912 = (Imm & 0x7f800) << 12;
+  return (imm_msb | imm_lsbs | imm_11 | imm_1912 | Rd << 7 | Opcode);
 }
 
 inline static bool patchSled(const bool Enable, const uint32_t FuncId,
@@ -57,29 +86,46 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   // We replace the following compile-time stub (sled):
   //
   // xray_sled_n:
-  //	B .tmpN
-  //	15 NOPs (60 bytes)
+  //	J .tmpN
+  //	30 NOPs (120 bytes)
   //	.tmpN
   //
   // With the following runtime patch:
   //
   // xray_sled_n (64-bit):
-  //    daddiu sp, sp, -16                      ;create stack frame
-  //    nop
-  //    sd ra, 8(sp)                            ;save return address
-  //    sd t9, 0(sp)                            ;save register t9
-  //    lui t9, %highest(__xray_FunctionEntry/Exit)
-  //    ori t9, t9, %higher(__xray_FunctionEntry/Exit)
-  //    dsll t9, t9, 16
-  //    ori t9, t9, %hi(__xray_FunctionEntry/Exit)
-  //    dsll t9, t9, 16
-  //    ori t9, t9, %lo(__xray_FunctionEntry/Exit)
-  //    lui t0, %hi(function_id)
-  //    ori t0, t0, %lo(function_id)            ;pass function id
-  //    jalr t9                                 ;call Tracing hook
-  //    ld t9, 0(sp)                            ;restore register t9
-  //    ld ra, 8(sp)                            ;restore return address
-  //    daddiu sp, sp, 16                       ;delete stack frame
+  //    daddiu sp, sp, -32                                                      ;create stack frame
+  //    sd ra, 24(sp)                                                           ;save return address
+  //    sd t2, 16(sp)                                                           ;save register t2
+  //    sd t1, 8(sp)                                                            ;save register t1
+  //    sd t0, 0(sp)                                                            ;save register t0
+  //    addi t0, r0, 1                                                          ;store 4096 in register t0 to handle 
+  //    slli t0, t0, 12                                                         ;cases when the 12 bit value is negative
+  //    lui t2, %highest(__xray_FunctionEntry/Exit)
+  //    dslli t2, t2, 32                                                        ;lui sign extends values to 64 bits
+  //    dsrli t2, t2, 32                                                        ;ensure that the value remains positive
+  //    addi t2, t2, %higher(__xray_FunctionEntry/Exit)
+  //    if higher was negative, i.e msb was 1 
+  //    add t2, t2, t0, else nop
+  //    slli t2, t2, 32
+  //    lui t1, t1, %hi(__xray_FunctionEntry/Exit)
+  //    dslli t1, t1, 32                                                        ;lui sign extends values to 64 bits
+  //    dsrli t1, t1, 32                                                        ;ensure that the value remains positive
+  //    addi t1, t1, %lo(__xray_FunctionEntry/Exit)
+  //    if higher was negative, i.e msb was 1 
+  //    add t1, t1, t0, else nop
+  //    or t1, t2, t1
+  //    lui t2, %hi(function_id)
+  //    dslli t2, t2, 32                                                        ;lui sign extends values to 64 bits
+  //    dsrli t2, t2, 32                                                        ;ensure that the value remains positive
+  //    addi t2, t2, %lo(function_id)                                           ;pass function id
+  //    if lower function id  was negative, i.e msb was 1 
+  //    add t2, t2, t0, else nop
+  //    jalr t1                                                                 ;call Tracing hook
+  //    ld t0, 0(sp)                                                            ;restore register t9
+  //    ld t1, 8(sp)                                                            ;restore register t9
+  //    ld t2, 16(sp)                                                            ;restore register t9
+  //    ld ra, 24(sp)                                                            ;restore return address
+  //    daddiu sp, sp, 32                                                       ;delete stack frame
   //
   // Replacement of the first 4-byte instruction should be the last and atomic
   // operation, so that the user code which reaches the sled concurrently
@@ -87,57 +133,104 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   // latter is ready.
   //
   // When |Enable|==false, we set back the first instruction in the sled to be
-  //   B #60
+  //   J #120
 
   uint32_t *Address = reinterpret_cast<uint32_t *>(Sled.address());
   if (Enable) {
     uint32_t LoTracingHookAddr =
-        reinterpret_cast<int64_t>(TracingHook) & 0xffff;
+        reinterpret_cast<int64_t>(TracingHook) & 0xfff;
     uint32_t HiTracingHookAddr =
-        (reinterpret_cast<int64_t>(TracingHook) >> 16) & 0xffff;
+        (reinterpret_cast<int64_t>(TracingHook) >> 12) & 0xfffff;
     uint32_t HigherTracingHookAddr =
-        (reinterpret_cast<int64_t>(TracingHook) >> 32) & 0xffff;
+        (reinterpret_cast<int64_t>(TracingHook) >> 32) & 0xfff;
     uint32_t HighestTracingHookAddr =
-        (reinterpret_cast<int64_t>(TracingHook) >> 48) & 0xffff;
-    uint32_t LoFunctionID = FuncId & 0xffff;
-    uint32_t HiFunctionID = (FuncId >> 16) & 0xffff;
-    Address[2] = encodeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
-                                   RegNum::RN_RA, 0x8);
-    Address[3] = encodeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
-                                   RegNum::RN_T9, 0x0);
-    Address[4] = encodeInstruction(PatchOpcodes::PO_LUI, 0x0, RegNum::RN_T9,
+        (reinterpret_cast<int64_t>(TracingHook) >> 44) & 0xfffff;
+    uint32_t LoFunctionID = FuncId & 0xfff;
+    uint32_t HiFunctionID = (FuncId >> 12) & 0xfffff;
+    Address[1] = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
+                                   RegNum::RN_RA, 0x18);
+    Address[2] = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
+                                   RegNum::RN_T2, 0x10);
+    Address[3] = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
+                                   RegNum::RN_T1, 0x8);
+    Address[4] = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
+                                   RegNum::RN_T0, 0x0);
+    Address[5] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
+                                   RegNum::RN_T0, 0x01);
+    Address[6] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T0,
+                                   RegNum::RN_T0, 0x0c);
+    Address[7] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T2,
                                    HighestTracingHookAddr);
-    Address[5] = encodeInstruction(PatchOpcodes::PO_ORI, RegNum::RN_T9,
-                                   RegNum::RN_T9, HigherTracingHookAddr);
-    Address[6] = encodeSpecialInstruction(PatchOpcodes::PO_DSLL, 0x0,
-                                          RegNum::RN_T9, RegNum::RN_T9, 0x10);
-    Address[7] = encodeInstruction(PatchOpcodes::PO_ORI, RegNum::RN_T9,
-                                   RegNum::RN_T9, HiTracingHookAddr);
-    Address[8] = encodeSpecialInstruction(PatchOpcodes::PO_DSLL, 0x0,
-                                          RegNum::RN_T9, RegNum::RN_T9, 0x10);
-    Address[9] = encodeInstruction(PatchOpcodes::PO_ORI, RegNum::RN_T9,
-                                   RegNum::RN_T9, LoTracingHookAddr);
-    Address[10] = encodeInstruction(PatchOpcodes::PO_LUI, 0x0, RegNum::RN_T0,
+    Address[8] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
+                                   RegNum::RN_T2, 0x20);
+    Address[9] = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T2,
+                                   RegNum::RN_T2, 0x20);
+    Address[10] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T2,
+                                   RegNum::RN_T2, HigherTracingHookAddr);
+    if((HigherTracingHookAddr & 0x0800) >> 11) {        // Add 4096
+        Address[11] = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_T2,
+                                       RegNum::RN_T2);
+    } else {                                            // NOP
+        Address[11] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
+                                       RegNum::RN_R0, 0);
+    }
+    Address[12] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
+                                   RegNum::RN_T2, 0x20);
+    Address[13] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
+                                   HiTracingHookAddr);
+    Address[14] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T1,
+                                   RegNum::RN_T1, 0x20);
+    Address[15] = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T1,
+                                   RegNum::RN_T1, 0x20);
+    Address[16] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
+                                   RegNum::RN_T1, LoTracingHookAddr);
+    if((LoTracingHookAddr & 0x0800) >> 11) {            // Add 4096
+        Address[17] = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_T1,
+                                       RegNum::RN_T1);
+    } else {                                            // NOP
+        Address[17] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
+                                       RegNum::RN_R0, 0);
+    }
+    Address[18] = encodeRTypeInstruction(PatchOpcodes::PO_OR, RegNum::RN_T1, RegNum::RN_T2,
+                                   RegNum::RN_T1);
+    Address[19] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T2,
                                     HiFunctionID);
-    Address[11] = encodeSpecialInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T9,
-                                           0x0, RegNum::RN_RA, 0X0);
-    Address[12] = encodeInstruction(PatchOpcodes::PO_ORI, RegNum::RN_T0,
-                                    RegNum::RN_T0, LoFunctionID);
-    Address[13] = encodeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
-                                    RegNum::RN_T9, 0x0);
-    Address[14] = encodeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
-                                    RegNum::RN_RA, 0x8);
-    Address[15] = encodeInstruction(PatchOpcodes::PO_DADDIU, RegNum::RN_SP,
-                                    RegNum::RN_SP, 0x10);
-    uint32_t CreateStackSpace = encodeInstruction(
-        PatchOpcodes::PO_DADDIU, RegNum::RN_SP, RegNum::RN_SP, 0xfff0);
+    Address[20] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
+                                   RegNum::RN_T2, 0x20);
+    Address[21] = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T2,
+                                   RegNum::RN_T2, 0x20);
+    Address[22] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T2,
+                                    RegNum::RN_T2, LoFunctionID);
+    if((LoFunctionID & 0x0800) >> 11) {                 // Add 4096
+        Address[23] = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_T2,
+                                       RegNum::RN_T2);
+    } else {                                            // NOP
+        Address[23] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
+                                       RegNum::RN_R0, 0);
+    }
+    Address[24] = encodeITypeInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T1,
+                                           RegNum::RN_RA, 0x0);
+    Address[25] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
+                                    RegNum::RN_T0, 0x0);
+    Address[26] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
+                                    RegNum::RN_T1, 0x8);
+    Address[27] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
+                                    RegNum::RN_T2, 0x10);
+    Address[28] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
+                                    RegNum::RN_RA, 0x18);
+    Address[29] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
+                                    RegNum::RN_SP, 0x20);
+    uint32_t CreateStackSpace = encodeITypeInstruction(
+        PatchOpcodes::PO_ADDI, RegNum::RN_SP, RegNum::RN_SP, 0xffe0);
     std::atomic_store_explicit(
         reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateStackSpace,
         std::memory_order_release);
   } else {
+    uint32_t CreateBranch = encodeJTypeInstruction(
+        PatchOpcodes::PO_B, RegNum::RN_R0, 0x076);
     std::atomic_store_explicit(
-        reinterpret_cast<std::atomic<uint32_t> *>(Address),
-        uint32_t(PatchOpcodes::PO_B60), std::memory_order_release);
+        reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateBranch,
+        std::memory_order_release);
   }
   return true;
 }
