@@ -174,6 +174,9 @@ bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
 
   SetupMachineFunction(MF);
   emitFunctionBody();
+
+  // Emit the XRay table
+  emitXRayTable();
   return false;
 }
 

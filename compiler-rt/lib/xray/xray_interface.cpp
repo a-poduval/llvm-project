@@ -54,6 +54,10 @@ static const int16_t cSledLength = 64;
 static const int16_t cSledLength = 8;
 #elif defined(__hexagon__)
 static const int16_t cSledLength = 20;
+#elif defined(__riscv32__)
+static const int16_t cSledLength = 124; //wrong, need to write the riscv32 sled - will be a good bit smaller than the 64 bit sled
+#elif defined(__riscv64__)
+static const int16_t cSledLength = 124;
 #else
 #error "Unsupported CPU Architecture"
 #endif /* CPU architecture */
