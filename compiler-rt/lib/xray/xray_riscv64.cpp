@@ -227,7 +227,7 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
         std::memory_order_release);
   } else {
     uint32_t CreateBranch = encodeJTypeInstruction(
-        PatchOpcodes::PO_B, RegNum::RN_R0, 0x076);
+        PatchOpcodes::PO_B, RegNum::RN_R0, 0x078);
     std::atomic_store_explicit(
         reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateBranch,
         std::memory_order_release);
