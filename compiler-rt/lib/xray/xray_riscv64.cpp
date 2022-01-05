@@ -26,8 +26,8 @@ enum PatchOpcodes : uint32_t {
   PO_LUI =   0x00000037,    // lui rd, imm
   PO_ORI =   0x00006013,    // ori rd, rs1, imm
   PO_OR =    0x00006033,    // or rd, rs1, rs2
-  PO_DSLLI = 0x00001013,    // slli rd, rs, shamt
-  PO_DSRLI = 0x00005013,    // srli rd, rs, shamt
+  PO_SLLI = 0x00001013,     // slli rd, rs, shamt
+  PO_SRLI = 0x00005013,     // srli rd, rs, shamt
   PO_JALR =  0x00000067,    // jalr rs
   PO_LD =    0x00003003,    // ld rd, base(offset)
   PO_B =     0x0000006f,    // jal #n_bytes
@@ -87,13 +87,13 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   //
   // xray_sled_n:
   //	J .tmpN
-  //	30 NOPs (120 bytes)
+  //	29 NOPs (116 bytes)
   //	.tmpN
   //
   // With the following runtime patch:
   //
   // xray_sled_n (64-bit):
-  //    daddiu sp, sp, -32                                                      ;create stack frame
+  //    addi sp, sp, -32                                                        ;create stack frame
   //    sd ra, 24(sp)                                                           ;save return address
   //    sd t2, 16(sp)                                                           ;save register t2
   //    sd t1, 8(sp)                                                            ;save register t1
@@ -101,31 +101,31 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   //    addi t0, r0, 1                                                          ;store 4096 in register t0 to handle 
   //    slli t0, t0, 12                                                         ;cases when the 12 bit value is negative
   //    lui t2, %highest(__xray_FunctionEntry/Exit)
-  //    dslli t2, t2, 32                                                        ;lui sign extends values to 64 bits
-  //    dsrli t2, t2, 32                                                        ;ensure that the value remains positive
+  //    slli t2, t2, 32                                                         ;lui sign extends values to 64 bits
+  //    srli t2, t2, 32                                                         ;ensure that the value remains positive
   //    addi t2, t2, %higher(__xray_FunctionEntry/Exit)
   //    if higher was negative, i.e msb was 1 
   //    add t2, t2, t0, else nop
   //    slli t2, t2, 32
   //    lui t1, t1, %hi(__xray_FunctionEntry/Exit)
-  //    dslli t1, t1, 32                                                        ;lui sign extends values to 64 bits
-  //    dsrli t1, t1, 32                                                        ;ensure that the value remains positive
+  //    slli t1, t1, 32                                                         ;lui sign extends values to 64 bits
+  //    srli t1, t1, 32                                                         ;ensure that the value remains positive
   //    addi t1, t1, %lo(__xray_FunctionEntry/Exit)
   //    if higher was negative, i.e msb was 1 
   //    add t1, t1, t0, else nop
   //    or t1, t2, t1
   //    lui t2, %hi(function_id)
-  //    dslli t2, t2, 32                                                        ;lui sign extends values to 64 bits
-  //    dsrli t2, t2, 32                                                        ;ensure that the value remains positive
+  //    slli t2, t2, 32                                                         ;lui sign extends values to 64 bits
+  //    srli t2, t2, 32                                                         ;ensure that the value remains positive
   //    addi t2, t2, %lo(function_id)                                           ;pass function id
   //    if lower function id  was negative, i.e msb was 1 
   //    add t2, t2, t0, else nop
   //    jalr t1                                                                 ;call Tracing hook
   //    ld t0, 0(sp)                                                            ;restore register t9
   //    ld t1, 8(sp)                                                            ;restore register t9
-  //    ld t2, 16(sp)                                                            ;restore register t9
-  //    ld ra, 24(sp)                                                            ;restore return address
-  //    daddiu sp, sp, 32                                                       ;delete stack frame
+  //    ld t2, 16(sp)                                                           ;restore register t9
+  //    ld ra, 24(sp)                                                           ;restore return address
+  //    addi sp, sp, 32                                                         ;delete stack frame
   //
   // Replacement of the first 4-byte instruction should be the last and atomic
   // operation, so that the user code which reaches the sled concurrently
@@ -133,7 +133,7 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   // latter is ready.
   //
   // When |Enable|==false, we set back the first instruction in the sled to be
-  //   J #120
+  //   J #120 bytes
 
   uint32_t *Address = reinterpret_cast<uint32_t *>(Sled.address());
   if (Enable) {
@@ -227,7 +227,7 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
         std::memory_order_release);
   } else {
     uint32_t CreateBranch = encodeJTypeInstruction(
-        PatchOpcodes::PO_B, RegNum::RN_R0, 0x078);
+        PatchOpcodes::PO_B, RegNum::RN_R0, 0x03c);				//jump encodes an offset in multiples of 2 bytes. 60*2 = 120
     std::atomic_store_explicit(
         reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateBranch,
         std::memory_order_release);
