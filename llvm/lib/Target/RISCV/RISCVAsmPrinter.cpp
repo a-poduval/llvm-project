@@ -65,8 +65,13 @@ public:
     return LowerRISCVMachineOperandToMCOperand(MO, MCOp, *this);
   }
 
+  //void LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI);
+  //void LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr &MI);
+  //void LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI);
+
   void emitStartOfAsmFile(Module &M) override;
   void emitEndOfAsmFile(Module &M) override;
+  //void emitSled(const MachineInstr &MI, SledKind Kind);
 
 private:
   void emitAttributes();

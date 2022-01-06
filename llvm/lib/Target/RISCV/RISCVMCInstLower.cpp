@@ -13,6 +13,7 @@
 
 #include "RISCV.h"
 #include "RISCVSubtarget.h"
+//#include "RISCVAsmPrinter.h"
 #include "MCTargetDesc/RISCVMCExpr.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -23,6 +24,7 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+//#include <cstdint>
 
 using namespace llvm;
 
@@ -205,6 +207,62 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
   return true;
 }
 
+/*
+void RISCVAsmPrinter::emitSled(const MachineInstr &MI, SledKind Kind) {
+  const uint8_t NoopsInSledCount = Subtarget.is64bit() ? 29 : 18;
+  // We want to emit the jump instruction and the nops
+  // constituting the sled. The format will be similar
+  // .Lxray_sled_N
+  //   ALIGN
+  //   J #120 or #76 bytes (depending on ISA)
+  //   29 or 18 NOP instructions
+  // .tmpN
+  OutStreamer->emitCodeAlignment(4, &getSubtargetInfo());
+  auto CurSled = OutContext.createTempSymbol("xray_sled_", true);
+  OutStreamer->emitLabel(CurSled);
+  auto Target = OutContext.createTempSymbol();
+
+  // Emit "J #bytes" instruction, which jumps over the nop sled to the actual
+  // start of function
+  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::JAL)
+		                   .addReg(RISCV::X0)
+		                   .addImm(NoopsInSledCount*2));
+
+  // Emit NOP instructions
+  for (int8_t I = 0; I < NoopsInSledCount; I++)
+	  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
+			                   .addReg(RISCV::X0)
+			                   .addReg(RISCV::X0)
+		                           .addImm(0));
+
+  OutStreamer->emitLabel(Target);
+  recordSled(CurSled, MI, Kind, 2);
+}
+
+void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI) {
+  const Function &F = MI->getParent()->getParent()->getFunction();
+  if (F.hasFnAttribute("patchable-function-entry")) {
+    unsigned Num;
+    if (F.getFnAttribute("patchable-function-entry")
+            .getValueAsString()
+            .getAsInteger(10, Num))
+      return false;
+    AP.emitNops(Num);
+    return true;
+  }
+
+  emitSled(MI, SledKind::FUNCTION_ENTER);
+}
+
+void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr &MI) {
+  emitSled(MI, SledKind::FUNCTION_EXIT);
+}
+
+void RISCVAsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI) {
+  emitSled(MI, SledKind::TAIL_CALL);
+}
+*/
+
 bool llvm::lowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
                                           AsmPrinter &AP) {
   if (lowerRISCVVMachineInstrToMCInst(MI, OutMI))
@@ -220,6 +278,7 @@ bool llvm::lowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
 
   switch (OutMI.getOpcode()) {
   case TargetOpcode::PATCHABLE_FUNCTION_ENTER: {
+    //LowerPATCHABLE_FUNCTION_ENTER(*MI);
     const Function &F = MI->getParent()->getParent()->getFunction();
     if (F.hasFnAttribute("patchable-function-entry")) {
       unsigned Num;
@@ -245,5 +304,15 @@ bool llvm::lowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
     OutMI.addOperand(MCOperand::createReg(RISCV::X0));
     break;
   }
+    /*
+  case TargetOpcode::PATCHABLE_FUNCTION_EXIT: {
+    LowerPATCHABLE_FUNCTION_EXIT(*MI);
+    break;
+  }
+  case TargetOpcode::PATCHABLE_TAIL_CALL: {
+    LowerPATCHABLE_TAIL_CALL(*MI);
+    break;
+  }
+    */
   return false;
 }
