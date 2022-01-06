@@ -16,6 +16,7 @@
 #include "MCTargetDesc/RISCVTargetStreamer.h"
 #include "RISCV.h"
 #include "RISCVTargetMachine.h"
+#include "RISCVSubtarget.h"
 #include "TargetInfo/RISCVTargetInfo.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/CodeGen/AsmPrinter.h"
@@ -25,10 +26,13 @@
 #include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/MC/MCAsmInfo.h"
 #include "llvm/MC/MCInst.h"
+#include "llvm/MC/MCInstBuilder.h"
 #include "llvm/MC/MCStreamer.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cstdint>
+
 using namespace llvm;
 
 #define DEBUG_TYPE "asm-printer"
@@ -65,16 +69,18 @@ public:
     return LowerRISCVMachineOperandToMCOperand(MO, MCOp, *this);
   }
 
-  //void LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI);
-  //void LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr &MI);
-  //void LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI);
+  // XRay Support
+  void LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr *MI);
+  void LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr *MI);
+  void LowerPATCHABLE_TAIL_CALL(const MachineInstr *MI);
 
   void emitStartOfAsmFile(Module &M) override;
   void emitEndOfAsmFile(Module &M) override;
-  //void emitSled(const MachineInstr &MI, SledKind Kind);
 
 private:
   void emitAttributes();
+  // XRay Support
+  void emitSled(const MachineInstr *MI, SledKind Kind);
 };
 }
 
@@ -98,8 +104,47 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
     return;
 
   MCInst TmpInst;
-  if (!lowerRISCVMachineInstrToMCInst(MI, TmpInst, *this))
-    EmitToStreamer(*OutStreamer, TmpInst);
+  LowerRISCVMachineInstrToMCInst(MI, TmpInst, *this);
+
+  switch (MI->getOpcode()) {
+  case TargetOpcode::PATCHABLE_FUNCTION_ENTER: {
+    const Function &F = MI->getParent()->getParent()->getFunction();
+    if (F.hasFnAttribute("patchable-function-entry")) {
+      unsigned Num;
+      if (F.getFnAttribute("patchable-function-entry")
+              .getValueAsString()
+              .getAsInteger(10, Num))
+        break;
+      (*this).emitNops(Num);
+      return;
+    }
+
+    LowerPATCHABLE_FUNCTION_ENTER(MI);
+    return;
+  }
+  case TargetOpcode::PATCHABLE_FUNCTION_EXIT: {
+    LowerPATCHABLE_FUNCTION_EXIT(MI);
+    return;
+  }
+  case TargetOpcode::PATCHABLE_TAIL_CALL: {
+    LowerPATCHABLE_TAIL_CALL(MI);
+    return;
+  }
+  case RISCV::PseudoReadVLENB:
+    TmpInst.setOpcode(RISCV::CSRRS);
+    TmpInst.addOperand(MCOperand::createImm(
+        RISCVSysReg::lookupSysRegByName("VLENB")->Encoding));
+    TmpInst.addOperand(MCOperand::createReg(RISCV::X0));
+    break;
+  case RISCV::PseudoReadVL:
+    TmpInst.setOpcode(RISCV::CSRRS);
+    TmpInst.addOperand(
+        MCOperand::createImm(RISCVSysReg::lookupSysRegByName("VL")->Encoding));
+    TmpInst.addOperand(MCOperand::createReg(RISCV::X0));
+    break;
+  }
+
+  EmitToStreamer(*OutStreamer, TmpInst);
 }
 
 bool RISCVAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
@@ -185,6 +230,18 @@ bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   return false;
 }
 
+void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr *MI) {
+  emitSled(MI, SledKind::FUNCTION_ENTER);
+}
+
+void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr *MI) {
+  emitSled(MI, SledKind::FUNCTION_EXIT);
+}
+
+void RISCVAsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr *MI) {
+  emitSled(MI, SledKind::TAIL_CALL);
+}
+
 void RISCVAsmPrinter::emitStartOfAsmFile(Module &M) {
   if (TM.getTargetTriple().isOSBinFormatELF())
     emitAttributes();
@@ -202,6 +259,42 @@ void RISCVAsmPrinter::emitAttributes() {
   RISCVTargetStreamer &RTS =
       static_cast<RISCVTargetStreamer &>(*OutStreamer->getTargetStreamer());
   RTS.emitTargetAttributes(*STI);
+}
+
+void RISCVAsmPrinter::emitSled(const MachineInstr *MI, SledKind Kind) {
+  const uint8_t NoopsInSledCount = MI->getParent()->getParent()->getSubtarget<RISCVSubtarget>().is64Bit() ? 29 : 18;
+  // We want to emit the jump instruction and the nops
+  // constituting the sled. The format will be similar
+  // .Lxray_sled_N
+  //   ALIGN
+  //   J #120 or #76 bytes (depending on ISA)
+  //   29 or 18 NOP instructions
+  // .tmpN
+  OutStreamer->emitCodeAlignment(4, &getSubtargetInfo());
+  auto CurSled = OutContext.createTempSymbol("xray_sled_", true);
+  OutStreamer->emitLabel(CurSled);
+  auto Target = OutContext.createTempSymbol();
+
+  const MCExpr *TargetExpr = MCSymbolRefExpr::create(
+      Target, MCSymbolRefExpr::VariantKind::VK_None, OutContext);
+  // Emit "J #bytes" instruction, which jumps over the nop sled to the actual
+  // start of function. I wasn't sure which immediate to add, therefore used
+  // addExpr to the Target label, which is also more readable.
+  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::JAL)
+		                   .addReg(RISCV::X0)
+		                   .addExpr(TargetExpr));
+		                   //.addImm(NoopsInSledCount*4));
+		                   //.addImm(NoopsInSledCount*2));
+
+  // Emit NOP instructions
+  for (int8_t I = 0; I < NoopsInSledCount; I++)
+	  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
+			                   .addReg(RISCV::X0)
+			                   .addReg(RISCV::X0)
+		                           .addImm(0));
+
+  OutStreamer->emitLabel(Target);
+  recordSled(CurSled, *MI, Kind, 2);
 }
 
 // Force static initialization.

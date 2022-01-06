@@ -13,7 +13,6 @@
 
 #include "RISCV.h"
 #include "RISCVSubtarget.h"
-//#include "RISCVAsmPrinter.h"
 #include "MCTargetDesc/RISCVMCExpr.h"
 #include "llvm/CodeGen/AsmPrinter.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
@@ -24,7 +23,6 @@
 #include "llvm/MC/MCInst.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
-//#include <cstdint>
 
 using namespace llvm;
 
@@ -240,17 +238,6 @@ void RISCVAsmPrinter::emitSled(const MachineInstr &MI, SledKind Kind) {
 }
 
 void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI) {
-  const Function &F = MI->getParent()->getParent()->getFunction();
-  if (F.hasFnAttribute("patchable-function-entry")) {
-    unsigned Num;
-    if (F.getFnAttribute("patchable-function-entry")
-            .getValueAsString()
-            .getAsInteger(10, Num))
-      return false;
-    AP.emitNops(Num);
-    return true;
-  }
-
   emitSled(MI, SledKind::FUNCTION_ENTER);
 }
 
@@ -263,10 +250,10 @@ void RISCVAsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI) {
 }
 */
 
-bool llvm::lowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
-                                          AsmPrinter &AP) {
+void llvm::LowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
+                                          const AsmPrinter &AP) {
   if (lowerRISCVVMachineInstrToMCInst(MI, OutMI))
-    return false;
+    return;
 
   OutMI.setOpcode(MI->getOpcode());
 
@@ -276,43 +263,5 @@ bool llvm::lowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
       OutMI.addOperand(MCOp);
   }
 
-  switch (OutMI.getOpcode()) {
-  case TargetOpcode::PATCHABLE_FUNCTION_ENTER: {
-    //LowerPATCHABLE_FUNCTION_ENTER(*MI);
-    const Function &F = MI->getParent()->getParent()->getFunction();
-    if (F.hasFnAttribute("patchable-function-entry")) {
-      unsigned Num;
-      if (F.getFnAttribute("patchable-function-entry")
-              .getValueAsString()
-              .getAsInteger(10, Num))
-        return false;
-      AP.emitNops(Num);
-      return true;
-    }
-    break;
-  }
-  case RISCV::PseudoReadVLENB:
-    OutMI.setOpcode(RISCV::CSRRS);
-    OutMI.addOperand(MCOperand::createImm(
-        RISCVSysReg::lookupSysRegByName("VLENB")->Encoding));
-    OutMI.addOperand(MCOperand::createReg(RISCV::X0));
-    break;
-  case RISCV::PseudoReadVL:
-    OutMI.setOpcode(RISCV::CSRRS);
-    OutMI.addOperand(
-        MCOperand::createImm(RISCVSysReg::lookupSysRegByName("VL")->Encoding));
-    OutMI.addOperand(MCOperand::createReg(RISCV::X0));
-    break;
-  }
-    /*
-  case TargetOpcode::PATCHABLE_FUNCTION_EXIT: {
-    LowerPATCHABLE_FUNCTION_EXIT(*MI);
-    break;
-  }
-  case TargetOpcode::PATCHABLE_TAIL_CALL: {
-    LowerPATCHABLE_TAIL_CALL(*MI);
-    break;
-  }
-    */
-  return false;
+  return;
 }

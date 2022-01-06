@@ -30,8 +30,8 @@ class MachineInstr;
 class MachineOperand;
 class PassRegistry;
 
-bool lowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
-                                    AsmPrinter &AP);
+void LowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
+                                    const AsmPrinter &AP);
 bool LowerRISCVMachineOperandToMCOperand(const MachineOperand &MO,
                                          MCOperand &MCOp, const AsmPrinter &AP);
 
