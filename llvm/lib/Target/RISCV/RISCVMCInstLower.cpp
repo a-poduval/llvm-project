@@ -205,51 +205,6 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
   return true;
 }
 
-/*
-void RISCVAsmPrinter::emitSled(const MachineInstr &MI, SledKind Kind) {
-  const uint8_t NoopsInSledCount = Subtarget.is64bit() ? 29 : 18;
-  // We want to emit the jump instruction and the nops
-  // constituting the sled. The format will be similar
-  // .Lxray_sled_N
-  //   ALIGN
-  //   J #120 or #76 bytes (depending on ISA)
-  //   29 or 18 NOP instructions
-  // .tmpN
-  OutStreamer->emitCodeAlignment(4, &getSubtargetInfo());
-  auto CurSled = OutContext.createTempSymbol("xray_sled_", true);
-  OutStreamer->emitLabel(CurSled);
-  auto Target = OutContext.createTempSymbol();
-
-  // Emit "J #bytes" instruction, which jumps over the nop sled to the actual
-  // start of function
-  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::JAL)
-		                   .addReg(RISCV::X0)
-		                   .addImm(NoopsInSledCount*2));
-
-  // Emit NOP instructions
-  for (int8_t I = 0; I < NoopsInSledCount; I++)
-	  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
-			                   .addReg(RISCV::X0)
-			                   .addReg(RISCV::X0)
-		                           .addImm(0));
-
-  OutStreamer->emitLabel(Target);
-  recordSled(CurSled, MI, Kind, 2);
-}
-
-void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr &MI) {
-  emitSled(MI, SledKind::FUNCTION_ENTER);
-}
-
-void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr &MI) {
-  emitSled(MI, SledKind::FUNCTION_EXIT);
-}
-
-void RISCVAsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr &MI) {
-  emitSled(MI, SledKind::TAIL_CALL);
-}
-*/
-
 void llvm::LowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
                                           const AsmPrinter &AP) {
   if (lowerRISCVVMachineInstrToMCInst(MI, OutMI))
