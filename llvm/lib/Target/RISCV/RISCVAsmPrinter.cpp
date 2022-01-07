@@ -103,8 +103,18 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
   if (emitPseudoExpansionLowering(*OutStreamer, MI))
     return;
 
+  // Handle XRay sleds while keeping changes minimal to avoid breaking functionality
   switch (MI->getOpcode()) {
   case TargetOpcode::PATCHABLE_FUNCTION_ENTER: {
+    // patchable-function-entry is handled in lowerRISCVMachineInstrToMCInst
+    // Therefore, we break out of the switch statement if we encounter it here.
+    // 
+    // This switch case section is only for patching XRay sleds, though it could
+    // handle cases covered by the aforementioned lowerRISCVMachineInstrtoMCInst
+    // function, though that would require changes to both files, and possibly RISCV.h. 
+    //
+    // XRay could be handled within the lowerRISCVMachineInstrtoMCInst function,
+    // but that will require significant changes to be made.
     const Function &F = MI->getParent()->getParent()->getFunction();
     if (F.hasFnAttribute("patchable-function-entry")) {
       break;
