@@ -96,11 +96,11 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   // With the following runtime patch:
   //
   // xray_sled_n (64-bit):
-  //    addi sp, sp, -32                                                        ;create stack frame
-  //    sd ra, 24(sp)                                                           ;save return address
-  //    sd t2, 16(sp)                                                           ;save register t2
-  //    sd t1, 8(sp)                                                            ;save register t1
-  //    sd t0, 0(sp)                                                            ;save register t0
+  //    addi sp, sp, -16                                                        ;create stack frame
+  //    sw ra, 12(sp)                                                           ;save return address
+  //    sw t2, 8(sp)                                                            ;save register t2
+  //    sw t1, 4(sp)                                                            ;save register t1
+  //    sw t0, 0(sp)                                                            ;save register t0
   //    addi t0, r0, 1                                                          ;store 4096 in register t0 to handle 
   //    slli t0, t0, 12                                                         ;cases when the 12 bit value is negative
   //    lui t1, %hi(__xray_FunctionEntry/Exit)
@@ -112,11 +112,11 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   //    if lower function id  was negative, i.e msb was 1 
   //    add t2, t2, t0, else nop
   //    jalr t1                                                                 ;call Tracing hook
-  //    ld t0, 0(sp)                                                            ;restore register t0
-  //    ld t1, 8(sp)                                                            ;restore register t1
-  //    ld t2, 16(sp)                                                           ;restore register t2
-  //    ld ra, 24(sp)                                                           ;restore return address
-  //    addi sp, sp, 32                                                         ;delete stack frame
+  //    lw t0, 0(sp)                                                            ;restore register t0
+  //    lw t1, 4(sp)                                                            ;restore register t1
+  //    lw t2, 8(sp)                                                            ;restore register t2
+  //    lw ra, 12(sp)                                                           ;restore return address
+  //    addi sp, sp, 16                                                         ;delete stack frame
   //
   // Replacement of the first 4-byte instruction should be the last and atomic
   // operation, so that the user code which reaches the sled concurrently
@@ -135,11 +135,11 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
     uint32_t LoFunctionID = FuncId & 0xfff;
     uint32_t HiFunctionID = (FuncId >> 12) & 0xfffff;
     Address[1] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
-                                   RegNum::RN_RA, 0x18);
+                                   RegNum::RN_RA, 0x0c);
     Address[2] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
-                                   RegNum::RN_T2, 0x10);
+                                   RegNum::RN_T2, 0x08);
     Address[3] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
-                                   RegNum::RN_T1, 0x8);
+                                   RegNum::RN_T1, 0x4);
     Address[4] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
                                    RegNum::RN_T0, 0x0);
     Address[5] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
@@ -173,15 +173,15 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
     Address[14] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
                                     RegNum::RN_T0, 0x0);
     Address[15] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
-                                    RegNum::RN_T1, 0x8);
+                                    RegNum::RN_T1, 0x4);
     Address[16] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
-                                    RegNum::RN_T2, 0x10);
+                                    RegNum::RN_T2, 0x08);
     Address[17] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
-                                    RegNum::RN_RA, 0x18);
+                                    RegNum::RN_RA, 0x0c);
     Address[18] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
-                                    RegNum::RN_SP, 0x20);
+                                    RegNum::RN_SP, 0x10);
     uint32_t CreateStackSpace = encodeITypeInstruction(
-        PatchOpcodes::PO_ADDI, RegNum::RN_SP, RegNum::RN_SP, 0xffe0);
+        PatchOpcodes::PO_ADDI, RegNum::RN_SP, RegNum::RN_SP, 0xfff0);
     std::atomic_store_explicit(
         reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateStackSpace,
         std::memory_order_release);
