@@ -103,20 +103,11 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
   if (emitPseudoExpansionLowering(*OutStreamer, MI))
     return;
 
-  MCInst TmpInst;
-  LowerRISCVMachineInstrToMCInst(MI, TmpInst, *this);
-
   switch (MI->getOpcode()) {
   case TargetOpcode::PATCHABLE_FUNCTION_ENTER: {
     const Function &F = MI->getParent()->getParent()->getFunction();
     if (F.hasFnAttribute("patchable-function-entry")) {
-      unsigned Num;
-      if (F.getFnAttribute("patchable-function-entry")
-              .getValueAsString()
-              .getAsInteger(10, Num))
-        break;
-      (*this).emitNops(Num);
-      return;
+      break;
     }
 
     LowerPATCHABLE_FUNCTION_ENTER(MI);
@@ -130,21 +121,11 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
     LowerPATCHABLE_TAIL_CALL(MI);
     return;
   }
-  case RISCV::PseudoReadVLENB:
-    TmpInst.setOpcode(RISCV::CSRRS);
-    TmpInst.addOperand(MCOperand::createImm(
-        RISCVSysReg::lookupSysRegByName("VLENB")->Encoding));
-    TmpInst.addOperand(MCOperand::createReg(RISCV::X0));
-    break;
-  case RISCV::PseudoReadVL:
-    TmpInst.setOpcode(RISCV::CSRRS);
-    TmpInst.addOperand(
-        MCOperand::createImm(RISCVSysReg::lookupSysRegByName("VL")->Encoding));
-    TmpInst.addOperand(MCOperand::createReg(RISCV::X0));
-    break;
   }
 
-  EmitToStreamer(*OutStreamer, TmpInst);
+  MCInst TmpInst;
+  if (!lowerRISCVMachineInstrToMCInst(MI, TmpInst, *this))
+    EmitToStreamer(*OutStreamer, TmpInst);
 }
 
 bool RISCVAsmPrinter::PrintAsmOperand(const MachineInstr *MI, unsigned OpNo,
