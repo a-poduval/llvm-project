@@ -45,7 +45,7 @@ enum RegNum : uint32_t {
 inline static uint32_t
 encodeRTypeInstruction(uint32_t Opcode, uint32_t Rs1, uint32_t Rs2,
                          uint32_t Rd) XRAY_NEVER_INSTRUMENT {
-  return (Rs << 20 | Rt << 15 | Rd << 7 | Opcode);
+  return (Rs2 << 20 | Rs1 << 15 | Rd << 7 | Opcode);
 }
 
 inline static uint32_t encodeITypeInstruction(uint32_t Opcode, uint32_t Rs1,
@@ -59,7 +59,7 @@ encodeSTypeInstruction(uint32_t Opcode, uint32_t Rs1, uint32_t Rs2,
                          uint32_t Imm) XRAY_NEVER_INSTRUMENT {
   uint32_t imm_msbs = (Imm & 0xfe0) << 25;
   uint32_t imm_lsbs = (Imm & 0x01f) << 7;
-  return (imm_msbs | Rs1 << 20 | Rs2 << 15 | imm_lsbs | Opcode);
+  return (imm_msbs | Rs2 << 20 | Rs1 << 15 | imm_lsbs | Opcode);
 }
 
 inline static uint32_t encodeUTypeInstruction(uint32_t Opcode, 
@@ -108,9 +108,9 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   //    if lower function id  was negative, i.e msb was 1 
   //    add t2, t2, t0, else nop
   //    jalr t1                                                                 ;call Tracing hook
-  //    ld t0, 0(sp)                                                            ;restore register t9
-  //    ld t1, 8(sp)                                                            ;restore register t9
-  //    ld t2, 16(sp)                                                           ;restore register t9
+  //    ld t0, 0(sp)                                                            ;restore register t0
+  //    ld t1, 8(sp)                                                            ;restore register t1
+  //    ld t2, 16(sp)                                                           ;restore register t2
   //    ld ra, 24(sp)                                                           ;restore return address
   //    addi sp, sp, 32                                                         ;delete stack frame
   //
