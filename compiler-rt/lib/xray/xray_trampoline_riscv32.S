@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 	.text
-	.file "xray_trampoline_riscv64.S"
+	.file "xray_trampoline_riscv32.S"
 	.globl __xray_FunctionEntry
 	.p2align 2
 	.type __xray_FunctionEntry,@function
