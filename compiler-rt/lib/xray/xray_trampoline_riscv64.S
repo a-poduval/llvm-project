@@ -46,12 +46,12 @@ __xray_FunctionEntry:
 
 	/* Should it be the following? I felt li would be a safer bet because
 	   it would result in the 32 bit value directly being loaded in a2
-	   Also, does RISCV have any standard conventions with the global pointer, like
-	   MIPS does, as seen in the MIPS XRay trampoline?
 
 	lui	a2, %hi(_ZN6__xray19XRayPatchedFunctionE)
 	addi	a2, %lo(_ZN6__xray19XRayPatchedFunctionE)
 
+	   Also, does RISCV have any standard conventions with the global pointer, like
+	   MIPS does, as seen in the MIPS XRay trampoline?
 	*/
 
 	// Handler address will be null if it is not set
@@ -105,18 +105,8 @@ __xray_FunctionExit:
 	sd	fa1, 8(sp)
 	sd	fa0, 0(sp)
 
-	// Load the handler function pointer into a2
+	// Load the handler function pointer into a2 - similar thoughts as above
 	li	a2, _ZN6__xray19XRayPatchedFunctionE
-
-	/* Should it be the following? I felt li would be a safer bet because
-	   it would result in the 32 bit value directly being loaded in a2
-	   Also, does RISCV have any standard conventions with the global pointer, like
-	   MIPS does, as seen in the MIPS XRay trampoline?
-
-	lui	a2, %hi(_ZN6__xray19XRayPatchedFunctionE)
-	addi	a2, %lo(_ZN6__xray19XRayPatchedFunctionE)
-
-	*/
 
 	// Handler address will be null if it is not set
 	beq	a2, x0, FunctionExit_restore
