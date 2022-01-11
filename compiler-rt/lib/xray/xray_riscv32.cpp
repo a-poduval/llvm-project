@@ -40,6 +40,7 @@ enum RegNum : uint32_t {
   RN_T0 = 0x5,
   RN_T1 = 0x6,
   RN_T2 = 0x7,
+  RN_A0 = 0xa,
 };
 
 inline static uint32_t
@@ -107,10 +108,10 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   //    addi t1, t1, %lo(__xray_FunctionEntry/Exit)
   //    if higher was negative, i.e msb was 1 
   //    add t1, t1, t0, else nop
-  //    lui t2, %hi(function_id)
-  //    addi t2, t2, %lo(function_id)                                           ;pass function id
+  //    lui a0, %hi(function_id)
+  //    addi a0, a0, %lo(function_id)                                           ;pass function id
   //    if lower function id  was negative, i.e msb was 1 
-  //    add t2, t2, t0, else nop
+  //    add a0, a0, t0, else nop
   //    jalr t1                                                                 ;call Tracing hook
   //    lw t0, 0(sp)                                                            ;restore register t0
   //    lw t1, 4(sp)                                                            ;restore register t1
@@ -157,13 +158,13 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
         Address[9] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
                                        RegNum::RN_R0, 0);
     }
-    Address[10] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T2,
+    Address[10] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
                                     HiFunctionID);
-    Address[11] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T2,
-                                    RegNum::RN_T2, LoFunctionID);
+    Address[11] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_A0,
+                                    RegNum::RN_A0, LoFunctionID);
     if((LoFunctionID & 0x0800) >> 11) {                 // Add 4096
-        Address[12] = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_T2,
-                                       RegNum::RN_T2);
+        Address[12] = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_A0,
+                                       RegNum::RN_A0);
     } else {                                            // NOP
         Address[12] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
                                        RegNum::RN_R0, 0);
