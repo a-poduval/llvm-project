@@ -35,8 +35,8 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
   if (!Args.hasFlag(options::OPT_fxray_instrument,
                     options::OPT_fno_xray_instrument, false))
     return;
-  //if (Triple.getOS() == llvm::Triple::Linux) {
-  if (Triple.getOS() == llvm::Triple::Linux || Triple.getOS() == llvm::Triple::UnknownOS) {
+  //if (Triple.getOS() == llvm::Triple::Linux || Triple.getOS() == llvm::Triple::UnknownOS) {
+  if (Triple.getOS() == llvm::Triple::Linux) {
     switch (Triple.getArch()) {
     case llvm::Triple::x86_64:
     case llvm::Triple::arm:

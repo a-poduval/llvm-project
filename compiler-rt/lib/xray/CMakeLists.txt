@@ -81,6 +81,7 @@ set(riscv32_SOURCES
 set(riscv64_SOURCES
   xray_riscv64.cpp
   xray_trampoline_riscv64.S
+  )
 
 set(hexagon_SOURCES
   xray_hexagon.cpp

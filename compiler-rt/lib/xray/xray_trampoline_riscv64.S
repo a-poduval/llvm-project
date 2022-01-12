@@ -32,17 +32,17 @@ __xray_FunctionEntry:
 	sd	a3, 80(sp)
 	sd	a2, 72(sp)
 	sd	a0, 64(sp)
-	sd	fa7, 56(sp)
-	sd	fa6, 48(sp)
-	sd	fa5, 40(sp)
-	sd	fa4, 32(sp)
-	sd	fa3, 24(sp)
-	sd	fa2, 16(sp)
-	sd	fa1, 8(sp)
-	sd	fa0, 0(sp)
+	fsd	fa7, 56(sp)
+	fsd	fa6, 48(sp)
+	fsd	fa5, 40(sp)
+	fsd	fa4, 32(sp)
+	fsd	fa3, 24(sp)
+	fsd	fa2, 16(sp)
+	fsd	fa1, 8(sp)
+	fsd	fa0, 0(sp)
 
 	// Load the handler function pointer into a2
-	li	a2, _ZN6__xray19XRayPatchedFunctionE
+	la	a2, _ZN6__xray19XRayPatchedFunctionE
 
 	/* Should it be the following? I felt li would be a safer bet because
 	   it would result in the 32 bit value directly being loaded in a2
@@ -65,14 +65,14 @@ __xray_FunctionEntry:
 
 FunctionEntry_restore:
 	// Restore argument registers
-	ld	fa0, 0(sp)
-	ld	fa1, 8(sp)
-	ld	fa2, 16(sp)
-	ld	fa3, 24(sp)
-	ld	fa4, 32(sp)
-	ld	fa5, 40(sp)
-	ld	fa6, 48(sp)
-	ld	fa7, 56(sp)
+	fld	fa0, 0(sp)
+	fld	fa1, 8(sp)
+	fld	fa2, 16(sp)
+	fld	fa3, 24(sp)
+	fld	fa4, 32(sp)
+	fld	fa5, 40(sp)
+	fld	fa6, 48(sp)
+	fld	fa7, 56(sp)
 	ld	a0, 64(sp)
 	ld	a1, 72(sp)
 	ld	a2, 80(sp)
@@ -102,11 +102,11 @@ __xray_FunctionExit:
 	.cfi_offset ra, -8
 	sd	a1, 24(sp)
 	sd	a0, 16(sp)
-	sd	fa1, 8(sp)
-	sd	fa0, 0(sp)
+	fsd	fa1, 8(sp)
+	fsd	fa0, 0(sp)
 
 	// Load the handler function pointer into a2 - similar thoughts as above
-	li	a2, _ZN6__xray19XRayPatchedFunctionE
+	la	a2, _ZN6__xray19XRayPatchedFunctionE
 
 	// Handler address will be null if it is not set
 	beq	a2, x0, FunctionExit_restore
@@ -119,8 +119,8 @@ __xray_FunctionExit:
 
 FunctionExit_restore:
 	// Restore return registers
-	ld	fa0, 0(sp)
-	ld	fa1, 8(sp)
+	fld	fa0, 0(sp)
+	fld	fa1, 8(sp)
 	ld	a0, 16(sp)
 	ld	a1, 24(sp)
 	ld	ra, 32(sp)
