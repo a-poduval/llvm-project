@@ -153,106 +153,106 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
         (reinterpret_cast<int64_t>(TracingHook) >> 44) & 0xfffff;
     uint32_t LoFunctionID = FuncId & 0xfff;
     uint32_t HiFunctionID = (FuncId >> 12) & 0xfffff;
-    CurrAddress = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
+    *CurrAddress = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
                                    RegNum::RN_RA, 0x18);
     CurrAddress += 2;
-    CurrAddress = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
+    *CurrAddress = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
                                    RegNum::RN_T2, 0x10);
     CurrAddress += 2;
-    CurrAddress = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
+    *CurrAddress = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
                                    RegNum::RN_T1, 0x8);
     CurrAddress += 2;
-    CurrAddress = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
+    *CurrAddress = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
                                    RegNum::RN_T0, 0x0);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
                                    RegNum::RN_T0, 0x01);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T0,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T0,
                                    RegNum::RN_T0, 0x0c);
     CurrAddress += 2;
-    CurrAddress = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T2,
+    *CurrAddress = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T2,
                                    HighestTracingHookAddr);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
                                    RegNum::RN_T2, 0x20);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T2,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T2,
                                    RegNum::RN_T2, 0x20);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T2,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T2,
                                    RegNum::RN_T2, HigherTracingHookAddr);
     CurrAddress += 2;
     if((HigherTracingHookAddr & 0x0800) >> 11) {        // Add 4096
-        CurrAddress = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_T2,
+        *CurrAddress = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_T2,
                                        RegNum::RN_T2);
     } else {                                            // NOP
-        CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
+        *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
                                        RegNum::RN_R0, 0);
     }
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
                                    RegNum::RN_T2, 0x20);
     CurrAddress += 2;
-    CurrAddress = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
+    *CurrAddress = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
                                    HiTracingHookAddr);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T1,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T1,
                                    RegNum::RN_T1, 0x20);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T1,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T1,
                                    RegNum::RN_T1, 0x20);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
                                    RegNum::RN_T1, LoTracingHookAddr);
     CurrAddress += 2;
     if((LoTracingHookAddr & 0x0800) >> 11) {            // Add 4096
-        CurrAddress = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_T1,
+        *CurrAddress = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_T1,
                                        RegNum::RN_T1);
     } else {                                            // NOP
-        CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
+        *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
                                        RegNum::RN_R0, 0);
     }
     CurrAddress += 2;
-    CurrAddress = encodeRTypeInstruction(PatchOpcodes::PO_OR, RegNum::RN_T1, RegNum::RN_T2,
+    *CurrAddress = encodeRTypeInstruction(PatchOpcodes::PO_OR, RegNum::RN_T1, RegNum::RN_T2,
                                    RegNum::RN_T1);
     CurrAddress += 2;
-    CurrAddress = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
+    *CurrAddress = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
                                     HiFunctionID);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_A0,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_A0,
                                    RegNum::RN_A0, 0x20);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_A0,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_A0,
                                    RegNum::RN_A0, 0x20);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_A0,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_A0,
                                     RegNum::RN_A0, LoFunctionID);
     CurrAddress += 2;
     if((LoFunctionID & 0x0800) >> 11) {                 // Add 4096
-        CurrAddress = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_A0,
+        *CurrAddress = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_A0,
                                        RegNum::RN_A0);
     } else {                                            // NOP
-        CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
+        *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
                                        RegNum::RN_R0, 0);
     }
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T1,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T1,
                                            RegNum::RN_RA, 0x0);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
                                     RegNum::RN_T0, 0x0);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
                                     RegNum::RN_T1, 0x8);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
                                     RegNum::RN_T2, 0x10);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
                                     RegNum::RN_RA, 0x18);
     CurrAddress += 2;
-    CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
+    *CurrAddress = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
                                     RegNum::RN_SP, 0x20);
     uint32_t CreateStackSpace = encodeITypeInstruction(
         PatchOpcodes::PO_ADDI, RegNum::RN_SP, RegNum::RN_SP, 0xffe0);
