@@ -49,16 +49,6 @@ __xray_FunctionEntry:
 	// Load the handler function pointer into a2
 	li	a2, _ZN6__xray19XRayPatchedFunctionE
 
-	/* Should it be the following? I felt li would be a safer bet because
-	   it would result in the 32 bit value directly being loaded in a2
-
-	lui	a2, %hi(_ZN6__xray19XRayPatchedFunctionE)
-	addi	a2, %lo(_ZN6__xray19XRayPatchedFunctionE)
-
-	   Also, does RISCV have any standard conventions with the global pointer, like
-	   MIPS does, as seen in the MIPS XRay trampoline?
-	*/
-
 	// Handler address will be null if it is not set
 	beq	a2, x0, FunctionEntry_restore
 
