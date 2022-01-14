@@ -43,6 +43,7 @@ __xray_FunctionEntry:
 
 	// Load the handler function pointer into a2
 	la	a2, _ZN6__xray19XRayPatchedFunctionE
+	ld	a2, 0(a2)
 
 	// Handler address will be null if it is not set
 	beq	a2, x0, FunctionEntry_restore
@@ -97,6 +98,7 @@ __xray_FunctionExit:
 
 	// Load the handler function pointer into a2 - similar thoughts as above
 	la	a2, _ZN6__xray19XRayPatchedFunctionE
+	ld	a2, 0(a2)
 
 	// Handler address will be null if it is not set
 	beq	a2, x0, FunctionExit_restore
