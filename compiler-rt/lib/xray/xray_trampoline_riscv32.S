@@ -20,31 +20,31 @@
 __xray_FunctionEntry:
 	.cfi_startproc
 	// Push argument registers to stack
-	addi	sp, sp, -68
-	.cfi_def_cfa_offset 68
-	sd	ra, 64(sp)
+	addi	sp, sp, -100
+	.cfi_def_cfa_offset 100
+	sw	ra, 96(sp)
 	.cfi_offset ra, -8
-	sd	a7, 60(sp)
-	sd	a6, 56(sp)
-	sd	a5, 52(sp)
-	sd	a4, 48(sp)
-	sd	a3, 44(sp)
-	sd	a3, 40(sp)
-	sd	a2, 36(sp)
-	sd	a0, 32(sp)
-	// If this is RISCV32D, then these (faX) will still be 64 bit 
-	// wide registers, so we should be incrementing by 8
+	sw	a7, 92(sp)
+	sw	a6, 88(sp)
+	sw	a5, 84(sp)
+	sw	a4, 80(sp)
+	sw	a3, 76(sp)
+	sw	a2, 72(sp)
+	sw	a1, 68(sp)
+	sw	a0, 64(sp)
+	// If this is RISCV32F, then these (faX) will still be 32 bit 
+	// wide registers, so we should be incrementing by 4
 	// Perhaps we can push a registers based on defines which
 	// indicate if we are following RISCV32I, IF or IFD
 	// We will need the same for rv64 as well
-	sd	fa7, 28(sp)
-	sd	fa6, 24(sp)
-	sd	fa5, 20(sp)
-	sd	fa4, 16(sp)
-	sd	fa3, 12(sp)
-	sd	fa2, 8(sp)
-	sd	fa1, 4(sp)
-	sd	fa0, 0(sp)
+	fsd	fa7, 56(sp)
+	fsd	fa6, 48(sp)
+	fsd	fa5, 40(sp)
+	fsd	fa4, 32(sp)
+	fsd	fa3, 24(sp)
+	fsd	fa2, 16(sp)
+	fsd	fa1, 8(sp)
+	fsd	fa0, 0(sp)
 
 	// Load the handler function pointer into a2
 	li	a2, _ZN6__xray19XRayPatchedFunctionE
@@ -60,24 +60,24 @@ __xray_FunctionEntry:
 
 FunctionEntry_restore:
 	// Restore argument registers
-	ld	fa0, 0(sp)
-	ld	fa1, 4(sp)
-	ld	fa2, 8(sp)
-	ld	fa3, 12(sp)
-	ld	fa4, 16(sp)
-	ld	fa5, 20(sp)
-	ld	fa6, 24(sp)
-	ld	fa7, 28(sp)
-	ld	a0, 32(sp)
-	ld	a1, 36(sp)
-	ld	a2, 40(sp)
-	ld	a3, 44(sp)
-	ld	a4, 48(sp)
-	ld	a5, 52(sp)
-	ld	a6, 56(sp)
-	ld	a7, 60(sp)
-	ld	ra, 64(sp)
-	addi	sp, sp, 68
+	fld	fa0, 0(sp)
+	fld	fa1, 8(sp)
+	fld	fa2, 16(sp)
+	fld	fa3, 24(sp)
+	fld	fa4, 32(sp)
+	fld	fa5, 40(sp)
+	fld	fa6, 48(sp)
+	fld	fa7, 56(sp)
+	lw	a0, 64(sp)
+	lw	a1, 68(sp)
+	lw	a2, 72(sp)
+	lw	a3, 76(sp)
+	lw	a4, 80(sp)
+	lw	a5, 84(sp)
+	lw	a6, 88(sp)
+	lw	a7, 92(sp)
+	lw	ra, 96(sp)
+	addi	sp, sp, 100
 	jr	ra
 
 FunctionEntry_end:
@@ -91,19 +91,19 @@ FunctionEntry_end:
 __xray_FunctionExit:
 	.cfi_startproc
 	// Push return registers to stack
-	addi	sp, sp, -20
-	.cfi_def_cfa_offset 20
-	sd	ra, 16(sp)
+	addi	sp, sp, -28
+	.cfi_def_cfa_offset 28
+	sw	ra, 24(sp)
 	.cfi_offset ra, -8
-	sd	a1, 12(sp)
-	sd	a0, 8(sp)
-	// If this is RISCV32D, then these (faX) will still be 64 bit 
-	// wide registers, so we should be incrementing by 8
+	sw	a1, 20(sp)
+	sw	a0, 16(sp)
+	// If this is RISCV32F, then these (faX) will still be 32 bit 
+	// wide registers, so we should be incrementing by 4
 	// Perhaps we can push a registers based on defines which
 	// indicate if we are following RISCV32I, IF or IFD
 	// We will need the same for rv64 as well
-	sd	fa1, 4(sp)
-	sd	fa0, 0(sp)
+	fsd	fa1, 8(sp)
+	fsd	fa0, 0(sp)
 
 	// Load the handler function pointer into a2 - similar thoughts as above
 	li	a2, _ZN6__xray19XRayPatchedFunctionE
@@ -119,12 +119,12 @@ __xray_FunctionExit:
 
 FunctionExit_restore:
 	// Restore return registers
-	ld	fa0, 0(sp)
-	ld	fa1, 4(sp)
-	ld	a0, 8(sp)
-	ld	a1, 12(sp)
-	ld	ra, 16(sp)
-	addi	sp, sp, 20
+	fld	fa0, 0(sp)
+	fld	fa1, 8(sp)
+	lw	a0, 16(sp)
+	lw	a1, 20(sp)
+	lw	ra, 24(sp)
+	addi	sp, sp, 28
 	jr	ra
 
 FunctionExit_end:
