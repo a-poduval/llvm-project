@@ -254,8 +254,8 @@ bool patchFunctionExit(const bool Enable, const uint32_t FuncId,
 bool patchFunctionTailExit(const bool Enable, const uint32_t FuncId,
                            const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
   // FIXME: Implement tail exits in riscv64
-  return false;
-  //return patchSled(Enable, FuncId, Sled, __xray_FunctionExit);
+  return patchSled(Enable, FuncId, Sled, __xray_FunctionExit);
+  //return patchSled(Enable, FuncId, Sled, __xray_FunctionTailExit);
 }
 
 bool patchCustomEvent(const bool Enable, const uint32_t FuncId,
