@@ -92,7 +92,7 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   //
   // xray_sled_n:
   //	J .tmpN
-  //	29 NOPs (116 bytes)
+  //	24 NOPs (96 bytes)
   //	.tmpN
   //
   // With the following runtime patch:
