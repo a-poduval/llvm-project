@@ -101,19 +101,15 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   //    sw ra, 12(sp)                                                           ;save return address
   //    sw t2, 8(sp)                                                            ;save register t2
   //    sw t1, 4(sp)                                                            ;save register t1
-  //    sw t0, 0(sp)                                                            ;save register t0
-  //    addi t0, r0, 1                                                          ;store 4096 in register t0 to handle 
-  //    slli t0, t0, 12                                                         ;cases when the 12 bit value is negative
-  //    lui t1, %hi(__xray_FunctionEntry/Exit)
-  //    addi t1, t1, %lo(__xray_FunctionEntry/Exit)
+  //    sw a0, 0(sp)                                                            ;save register a0
   //    if higher was negative, i.e msb was 1 
-  //    add t1, t1, t0, else nop
-  //    lui a0, %hi(function_id)
-  //    addi a0, a0, %lo(function_id)                                           ;pass function id
+  //    lui t1, %hi(__xray_FunctionEntry/Exit) + 1 else lui t1, %hi(__xray_FunctionEntry/Exit)
+  //    addi t1, t1, %lo(__xray_FunctionEntry/Exit)
   //    if lower function id  was negative, i.e msb was 1 
-  //    add a0, a0, t0, else nop
+  //    lui a0, %hi(function_id) + 1 else lui a0, %hi(function_id)
+  //    addi a0, a0, %lo(function_id)                                           ;pass function id
   //    jalr t1                                                                 ;call Tracing hook
-  //    lw t0, 0(sp)                                                            ;restore register t0
+  //    lw a0, 0(sp)                                                            ;restore register a0
   //    lw t1, 4(sp)                                                            ;restore register t1
   //    lw t2, 8(sp)                                                            ;restore register t2
   //    lw ra, 12(sp)                                                           ;restore return address
@@ -125,7 +121,7 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
   // latter is ready.
   //
   // When |Enable|==false, we set back the first instruction in the sled to be
-  //   J #76 bytes
+  //   J #60 bytes
 
   uint32_t *Address = reinterpret_cast<uint32_t *>(Sled.address());
   if (Enable) {
@@ -142,44 +138,36 @@ inline static bool patchSled(const bool Enable, const uint32_t FuncId,
     Address[3] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
                                    RegNum::RN_T1, 0x4);
     Address[4] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
-                                   RegNum::RN_T0, 0x0);
-    Address[5] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
-                                   RegNum::RN_T0, 0x01);
-    Address[6] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T0,
-                                   RegNum::RN_T0, 0x0c);
-    Address[7] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
-                                   HiTracingHookAddr);
-    Address[8] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
-                                   RegNum::RN_T1, LoTracingHookAddr);
+                                   RegNum::RN_A0, 0x0);
     if((LoTracingHookAddr & 0x0800) >> 11) {            // Add 4096
-        Address[9] = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_T1,
-                                       RegNum::RN_T1);
-    } else {                                            // NOP
-        Address[9] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
-                                       RegNum::RN_R0, 0);
+    	Address[5] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
+        	                           (HiTracingHookAddr + 1));
+    } else {                                            // Unchanged
+    	Address[5] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
+        	                           HiTracingHookAddr);
     }
-    Address[10] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
-                                    HiFunctionID);
-    Address[11] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_A0,
-                                    RegNum::RN_A0, LoFunctionID);
+    Address[6] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
+                                   RegNum::RN_T1, LoTracingHookAddr);
     if((LoFunctionID & 0x0800) >> 11) {                 // Add 4096
-        Address[12] = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T0, RegNum::RN_A0,
-                                       RegNum::RN_A0);
-    } else {                                            // NOP
-        Address[12] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_R0,
-                                       RegNum::RN_R0, 0);
+    	Address[7] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
+        	                            (HiFunctionID + 1));
+    } else {                                            // Unchanged
+    	Address[7] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
+        	                            HiFunctionID);
     }
-    Address[13] = encodeITypeInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T1,
+    Address[8] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_A0,
+                                    RegNum::RN_A0, LoFunctionID);
+    Address[9] = encodeITypeInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T1,
                                            RegNum::RN_RA, 0x0);
-    Address[14] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
-                                    RegNum::RN_T0, 0x0);
-    Address[15] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
+    Address[10] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
+                                    RegNum::RN_A0, 0x0);
+    Address[11] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
                                     RegNum::RN_T1, 0x4);
-    Address[16] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
+    Address[12] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
                                     RegNum::RN_T2, 0x08);
-    Address[17] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
+    Address[13] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
                                     RegNum::RN_RA, 0x0c);
-    Address[18] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
+    Address[14] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
                                     RegNum::RN_SP, 0x10);
     uint32_t CreateStackSpace = encodeITypeInstruction(
         PatchOpcodes::PO_ADDI, RegNum::RN_SP, RegNum::RN_SP, 0xfff0);

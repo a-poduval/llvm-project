@@ -253,12 +253,12 @@ void RISCVAsmPrinter::emitAttributes() {
 }
 
 void RISCVAsmPrinter::emitSled(const MachineInstr *MI, SledKind Kind) {
-  const uint8_t NoopsInSledCount = MI->getParent()->getParent()->getSubtarget<RISCVSubtarget>().is64Bit() ? 29 : 18;
+  const uint8_t NoopsInSledCount = MI->getParent()->getParent()->getSubtarget<RISCVSubtarget>().is64Bit() ? 24 : 14;
   // We want to emit the jump instruction and the nops
   // constituting the sled. The format will be similar
   // .Lxray_sled_N
   //   ALIGN
-  //   J #120 or #76 bytes (depending on ISA)
+  //   J #100 or #60 bytes (depending on ISA)
   //   29 or 18 NOP instructions
   // .tmpN
   OutStreamer->emitCodeAlignment(4, &getSubtargetInfo());
