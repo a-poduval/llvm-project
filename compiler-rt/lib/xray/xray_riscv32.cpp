@@ -67,10 +67,6 @@ inline static uint32_t encodeUTypeInstruction(uint32_t Opcode,
                                          uint32_t Rd,
                                          uint32_t Imm) XRAY_NEVER_INSTRUMENT {
   return (Imm << 12 | Rd << 7 | Opcode);
-  // Not sure if  an entire 32 bit value is taken and the lower 12 bits are zeroed out
-  // That is, the immediate which is passed to U Type instructions is 32 bits, and it is
-  // converted to a 20 bit value, in which case this function should return the following.
-  // return ((Imm >> 12)<<12 | Rd << 7 | Opcode);
 }
 
 inline static uint32_t encodeJTypeInstruction(uint32_t Opcode, 
