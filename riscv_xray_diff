@@ -1,0 +1,1094 @@
+diff --git a/clang/lib/Driver/XRayArgs.cpp b/clang/lib/Driver/XRayArgs.cpp
+index 63b575178bd1..df5d38fc58a2 100644
+--- a/clang/lib/Driver/XRayArgs.cpp
++++ b/clang/lib/Driver/XRayArgs.cpp
+@@ -46,6 +46,8 @@ XRayArgs::XRayArgs(const ToolChain &TC, const ArgList &Args) {
+     case llvm::Triple::mipsel:
+     case llvm::Triple::mips64:
+     case llvm::Triple::mips64el:
++    //case llvm::Triple::riscv32:
++    case llvm::Triple::riscv64:
+       break;
+     default:
+       D.Diag(diag::err_drv_clang_unsupported)
+diff --git a/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake b/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake
+index 3e86cf63c789..2acc109fec13 100644
+--- a/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake
++++ b/compiler-rt/cmake/Modules/AllSupportedArchDefs.cmake
+@@ -74,7 +74,7 @@ if(APPLE)
+ set(ALL_XRAY_SUPPORTED_ARCH ${X86_64})
+ else()
+ set(ALL_XRAY_SUPPORTED_ARCH ${X86_64} ${ARM32} ${ARM64} ${MIPS32} ${MIPS64}
+-		powerpc64le ${HEXAGON})
++		powerpc64le ${HEXAGON} #[[${RISCV32}]] ${RISCV64})
+ endif()
+ set(ALL_SHADOWCALLSTACK_SUPPORTED_ARCH ${ARM64})
+ 
+diff --git a/compiler-rt/lib/xray/CMakeLists.txt b/compiler-rt/lib/xray/CMakeLists.txt
+index ca9389747a5e..4c17937154a4 100644
+--- a/compiler-rt/lib/xray/CMakeLists.txt
++++ b/compiler-rt/lib/xray/CMakeLists.txt
+@@ -78,6 +78,16 @@ set(hexagon_SOURCES
+   xray_trampoline_hexagon.S
+   )
+ 
++#set(riscv32_SOURCES
++#  xray_riscv32.cpp
++#  xray_trampoline_riscv32.S
++#  )
++
++set(riscv64_SOURCES
++  xray_riscv64.cpp
++  xray_trampoline_riscv64.S
++  )
++
+ set(XRAY_IMPL_HEADERS
+   xray_allocator.h
+   xray_basic_flags.h
+@@ -122,6 +132,8 @@ set(XRAY_ALL_SOURCE_FILES
+   ${mips64_SOURCES}
+   ${mips64el_SOURCES}
+   ${powerpc64le_SOURCES}
++  #${riscv32_SOURCES}
++  ${riscv64_SOURCES}
+   ${XRAY_IMPL_HEADERS}
+   )
+ list(REMOVE_DUPLICATES XRAY_ALL_SOURCE_FILES)
+diff --git a/compiler-rt/lib/xray/xray_interface.cpp b/compiler-rt/lib/xray/xray_interface.cpp
+index 73e67618c9d5..5eb23057936b 100644
+--- a/compiler-rt/lib/xray/xray_interface.cpp
++++ b/compiler-rt/lib/xray/xray_interface.cpp
+@@ -54,6 +54,10 @@ static const int16_t cSledLength = 64;
+ static const int16_t cSledLength = 8;
+ #elif defined(__hexagon__)
+ static const int16_t cSledLength = 20;
++#elif SANITIZER_RISCV64
++static const int16_t cSledLength = 100;
++//#elif defined(__riscv) && (__riscv_xlen == 32)
++//static const int16_t cSledLength = 60;
+ #else
+ #error "Unsupported CPU Architecture"
+ #endif /* CPU architecture */
+diff --git a/compiler-rt/lib/xray/xray_riscv32.cpp b/compiler-rt/lib/xray/xray_riscv32.cpp
+new file mode 100644
+index 000000000000..019c4bfdb2e9
+--- /dev/null
++++ b/compiler-rt/lib/xray/xray_riscv32.cpp
+@@ -0,0 +1,216 @@
++//===-- xray_riscv32.cpp ----------------------------------------*- C++ -*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++//
++// This file is a part of XRay, a dynamic runtime instrumentation system.
++//
++// Implementation of riscv32-specific routines (64-bit).
++//
++//===----------------------------------------------------------------------===//
++#include "sanitizer_common/sanitizer_common.h"
++#include "xray_defs.h"
++#include "xray_interface_internal.h"
++#include <atomic>
++
++namespace __xray {
++
++// The machine codes for some instructions used in runtime patching.
++enum PatchOpcodes : uint32_t {
++  PO_ADDI = 0x00000013,   // addi rd, rs1, imm
++  PO_ADD =   0x00000033,  // add rd, rs1, rs2
++  PO_SW = 0x00002023,     // sw rt, base(offset)
++  PO_LUI = 0x00000037,    // lui rd, imm
++  PO_ORI = 0x00000013,    // ori rd, rs1, imm
++  PO_OR =    0x00006033,  // or rd, rs1, rs2
++  PO_SLLI = 0x00001013,   // slli rd, rs, shamt
++  PO_JALR = 0x00000067,   // jalr rs
++  PO_LW = 0x00002003,     // lw rd, base(offset)
++  PO_B = 0x0000006f,      // jal #n_bytes
++  PO_NOP = 0x00000013,    // nop - pseduo-instruction, same as addi r0, r0, 0
++};
++
++enum RegNum : uint32_t {
++  RN_R0 = 0x0,
++  RN_RA = 0x1,
++  RN_SP = 0x2,
++  RN_T0 = 0x5,
++  RN_T1 = 0x6,
++  RN_T2 = 0x7,
++  RN_A0 = 0xa,
++};
++
++inline static uint32_t
++encodeRTypeInstruction(uint32_t Opcode, uint32_t Rs1, uint32_t Rs2,
++                         uint32_t Rd) XRAY_NEVER_INSTRUMENT {
++  return (Rs2 << 20 | Rs1 << 15 | Rd << 7 | Opcode);
++}
++
++inline static uint32_t encodeITypeInstruction(uint32_t Opcode, uint32_t Rs1,
++                                         uint32_t Rd,
++                                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
++  return (Imm << 20 | Rs1 << 15 | Rd << 7 | Opcode);
++}
++
++inline static uint32_t
++encodeSTypeInstruction(uint32_t Opcode, uint32_t Rs1, uint32_t Rs2,
++                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
++  uint32_t imm_msbs = (Imm & 0xfe0) << 25;
++  uint32_t imm_lsbs = (Imm & 0x01f) << 7;
++  return (imm_msbs | Rs2 << 20 | Rs1 << 15 | imm_lsbs | Opcode);
++}
++
++inline static uint32_t encodeUTypeInstruction(uint32_t Opcode, 
++                                         uint32_t Rd,
++                                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
++  return (Imm << 12 | Rd << 7 | Opcode);
++}
++
++inline static uint32_t encodeJTypeInstruction(uint32_t Opcode, 
++                                         uint32_t Rd,
++                                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
++  uint32_t imm_msb = (Imm & 0x80000) << 31;
++  uint32_t imm_lsbs = (Imm & 0x003ff) << 21;
++  uint32_t imm_11 = (Imm & 0x00400) << 20;
++  uint32_t imm_1912 = (Imm & 0x7f800) << 12;
++  return (imm_msb | imm_lsbs | imm_11 | imm_1912 | Rd << 7 | Opcode);
++}
++
++inline static bool patchSled(const bool Enable, const uint32_t FuncId,
++                             const XRaySledEntry &Sled,
++                             void (*TracingHook)()) XRAY_NEVER_INSTRUMENT {
++  // When |Enable| == true,
++  // We replace the following compile-time stub (sled):
++  //
++  // xray_sled_n:
++  //	J .tmpN
++  //	14 NOPs (56 bytes)
++  //	.tmpN
++  //
++  // With the following runtime patch:
++  //
++  // xray_sled_n (64-bit):
++  //    addi sp, sp, -16                                                        ;create stack frame
++  //    sw ra, 12(sp)                                                           ;save return address
++  //    sw t2, 8(sp)                                                            ;save register t2
++  //    sw t1, 4(sp)                                                            ;save register t1
++  //    sw a0, 0(sp)                                                            ;save register a0
++  //    if higher was negative, i.e msb was 1 
++  //    lui t1, %hi(__xray_FunctionEntry/Exit) + 1 else lui t1, %hi(__xray_FunctionEntry/Exit)
++  //    addi t1, t1, %lo(__xray_FunctionEntry/Exit)
++  //    if lower function id  was negative, i.e msb was 1 
++  //    lui a0, %hi(function_id) + 1 else lui a0, %hi(function_id)
++  //    addi a0, a0, %lo(function_id)                                           ;pass function id
++  //    jalr t1                                                                 ;call Tracing hook
++  //    lw a0, 0(sp)                                                            ;restore register a0
++  //    lw t1, 4(sp)                                                            ;restore register t1
++  //    lw t2, 8(sp)                                                            ;restore register t2
++  //    lw ra, 12(sp)                                                           ;restore return address
++  //    addi sp, sp, 16                                                         ;delete stack frame
++  //
++  // Replacement of the first 4-byte instruction should be the last and atomic
++  // operation, so that the user code which reaches the sled concurrently
++  // either jumps over the whole sled, or executes the whole sled when the
++  // latter is ready.
++  //
++  // When |Enable|==false, we set back the first instruction in the sled to be
++  //   J #60 bytes
++
++  uint32_t *Address = reinterpret_cast<uint32_t *>(Sled.address());
++  if (Enable) {
++    uint32_t LoTracingHookAddr =
++        reinterpret_cast<int64_t>(TracingHook) & 0xfff;
++    uint32_t HiTracingHookAddr =
++        (reinterpret_cast<int64_t>(TracingHook) >> 12) & 0xfffff;
++    uint32_t LoFunctionID = FuncId & 0xfff;
++    uint32_t HiFunctionID = (FuncId >> 12) & 0xfffff;
++    Address[1] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
++                                   RegNum::RN_RA, 0x0c);
++    Address[2] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
++                                   RegNum::RN_T2, 0x08);
++    Address[3] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
++                                   RegNum::RN_T1, 0x4);
++    Address[4] = encodeSTypeInstruction(PatchOpcodes::PO_SW, RegNum::RN_SP,
++                                   RegNum::RN_A0, 0x0);
++    if((LoTracingHookAddr & 0x0800) >> 11) {            // Add 4096
++    	Address[5] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
++        	                           (HiTracingHookAddr + 1));
++    } else {                                            // Unchanged
++    	Address[5] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
++        	                           HiTracingHookAddr);
++    }
++    Address[6] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
++                                   RegNum::RN_T1, LoTracingHookAddr);
++    if((LoFunctionID & 0x0800) >> 11) {                 // Add 4096
++    	Address[7] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
++        	                            (HiFunctionID + 1));
++    } else {                                            // Unchanged
++    	Address[7] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
++        	                            HiFunctionID);
++    }
++    Address[8] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_A0,
++                                    RegNum::RN_A0, LoFunctionID);
++    Address[9] = encodeITypeInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T1,
++                                           RegNum::RN_RA, 0x0);
++    Address[10] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
++                                    RegNum::RN_A0, 0x0);
++    Address[11] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
++                                    RegNum::RN_T1, 0x4);
++    Address[12] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
++                                    RegNum::RN_T2, 0x08);
++    Address[13] = encodeITypeInstruction(PatchOpcodes::PO_LW, RegNum::RN_SP,
++                                    RegNum::RN_RA, 0x0c);
++    Address[14] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
++                                    RegNum::RN_SP, 0x10);
++    uint32_t CreateStackSpace = encodeITypeInstruction(
++        PatchOpcodes::PO_ADDI, RegNum::RN_SP, RegNum::RN_SP, 0xfff0);
++    std::atomic_store_explicit(
++        reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateStackSpace,
++        std::memory_order_release);
++  } else {
++    uint32_t CreateBranch = encodeJTypeInstruction(
++        PatchOpcodes::PO_B, RegNum::RN_R0, 0x026);				//jump encodes an offset in multiples of 2 bytes. 38*2 = 76
++    std::atomic_store_explicit(
++        reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateBranch,
++        std::memory_order_release);
++  }
++  return true;
++}
++
++bool patchFunctionEntry(const bool Enable, const uint32_t FuncId,
++                        const XRaySledEntry &Sled,
++                        void (*Trampoline)()) XRAY_NEVER_INSTRUMENT {
++  return patchSled(Enable, FuncId, Sled, Trampoline);
++}
++
++bool patchFunctionExit(const bool Enable, const uint32_t FuncId,
++                       const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  return patchSled(Enable, FuncId, Sled, __xray_FunctionExit);
++}
++
++bool patchFunctionTailExit(const bool Enable, const uint32_t FuncId,
++                           const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  // FIXME: Implement tail exits in riscv32
++  return patchSled(Enable, FuncId, Sled, __xray_FunctionExit);
++  //return patchSled(Enable, FuncId, Sled, __xray_FunctionTailExit);
++}
++
++bool patchCustomEvent(const bool Enable, const uint32_t FuncId,
++                      const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  // FIXME: Implement in riscv32?
++  return false;
++}
++
++bool patchTypedEvent(const bool Enable, const uint32_t FuncId,
++                     const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  // FIXME: Implement in riscv32?
++  return false;
++}
++} // namespace __xray
++
++extern "C" void __xray_ArgLoggerEntry() XRAY_NEVER_INSTRUMENT {
++  // FIXME: this will have to be implemented in the trampoline assembly file
++}
+diff --git a/compiler-rt/lib/xray/xray_riscv64.cpp b/compiler-rt/lib/xray/xray_riscv64.cpp
+new file mode 100644
+index 000000000000..5616043f95c3
+--- /dev/null
++++ b/compiler-rt/lib/xray/xray_riscv64.cpp
+@@ -0,0 +1,257 @@
++//===-- xray_riscv64.cpp ----------------------------------------*- C++ -*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++//
++// This file is a part of XRay, a dynamic runtime instrumentation system.
++//
++// Implementation of riscv64-specific routines (64-bit).
++//
++//===----------------------------------------------------------------------===//
++#include "sanitizer_common/sanitizer_common.h"
++#include "xray_defs.h"
++#include "xray_interface_internal.h"
++#include <atomic>
++
++namespace __xray {
++
++// The machine codes for some instructions used in runtime patching.
++enum PatchOpcodes : uint32_t {
++  PO_ADDI =  0x00000013,    // addi rd, rs1, imm
++  PO_ADD =   0x00000033,    // add rd, rs1, rs2
++  PO_SD =    0x00003023,    // sd rt, base(offset)
++  PO_LUI =   0x00000037,    // lui rd, imm
++  PO_ORI =   0x00006013,    // ori rd, rs1, imm
++  PO_OR =    0x00006033,    // or rd, rs1, rs2
++  PO_SLLI = 0x00001013,     // slli rd, rs, shamt
++  PO_SRLI = 0x00005013,     // srli rd, rs, shamt
++  PO_JALR =  0x00000067,    // jalr rs
++  PO_LD =    0x00003003,    // ld rd, base(offset)
++  PO_B =     0x0000006f,    // jal #n_bytes
++  PO_NOP =   0x00000013,    // nop - pseduo-instruction, same as addi r0, r0, 0
++};
++
++enum RegNum : uint32_t {
++  RN_R0 = 0x0,
++  RN_RA = 0x1,
++  RN_SP = 0x2,
++  RN_T0 = 0x5,
++  RN_T1 = 0x6,
++  RN_T2 = 0x7,
++  RN_A0 = 0xa,
++};
++
++inline static uint32_t
++encodeRTypeInstruction(uint32_t Opcode, uint32_t Rs1, uint32_t Rs2,
++                         uint32_t Rd) XRAY_NEVER_INSTRUMENT {
++  return (Rs2 << 20 | Rs1 << 15 | Rd << 7 | Opcode);
++}
++
++inline static uint32_t encodeITypeInstruction(uint32_t Opcode, uint32_t Rs1,
++                                         uint32_t Rd,
++                                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
++  return (Imm << 20 | Rs1 << 15 | Rd << 7 | Opcode);
++}
++
++inline static uint32_t
++encodeSTypeInstruction(uint32_t Opcode, uint32_t Rs1, uint32_t Rs2,
++                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
++  uint32_t imm_msbs = (Imm & 0xfe0) << 25;
++  uint32_t imm_lsbs = (Imm & 0x01f) << 7;
++  return (imm_msbs | Rs2 << 20 | Rs1 << 15 | imm_lsbs | Opcode);
++}
++
++inline static uint32_t encodeUTypeInstruction(uint32_t Opcode, 
++                                         uint32_t Rd,
++                                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
++  return (Imm << 12 | Rd << 7 | Opcode);
++}
++
++inline static uint32_t encodeJTypeInstruction(uint32_t Opcode, 
++                                         uint32_t Rd,
++                                         uint32_t Imm) XRAY_NEVER_INSTRUMENT {
++  uint32_t imm_msb = (Imm & 0x80000) << 31;
++  uint32_t imm_lsbs = (Imm & 0x003ff) << 21;
++  uint32_t imm_11 = (Imm & 0x00400) << 20;
++  uint32_t imm_1912 = (Imm & 0x7f800) << 12;
++  return (imm_msb | imm_lsbs | imm_11 | imm_1912 | Rd << 7 | Opcode);
++}
++
++inline static bool patchSled(const bool Enable, const uint32_t FuncId,
++                             const XRaySledEntry &Sled,
++                             void (*TracingHook)()) XRAY_NEVER_INSTRUMENT {
++  // When |Enable| == true,
++  // We replace the following compile-time stub (sled):
++  //
++  // xray_sled_n:
++  //	J .tmpN
++  //	24 NOPs (96 bytes)
++  //	.tmpN
++  //
++  // With the following runtime patch:
++  //
++  // xray_sled_n (64-bit):
++  //    addi sp, sp, -32                                                        ;create stack frame
++  //    sd ra, 24(sp)                                                           ;save return address
++  //    sd t2, 16(sp)                                                           ;save register t2
++  //    sd t1, 8(sp)                                                            ;save register t1
++  //    sd a0, 0(sp)                                                            ;save register a0
++  //    if higher was negative, i.e msb was 1 
++  //    lui t2, %highest(__xray_FunctionEntry/Exit) + 1 else lui t2, %highest(__xray_FunctionEntry/Exit)
++  //    slli t2, t2, 32                                                         ;lui sign extends values to 64 bits
++  //    srli t2, t2, 32                                                         ;ensure that the value remains positive
++  //    addi t2, t2, %higher(__xray_FunctionEntry/Exit)
++  //    slli t2, t2, 32
++  //    if lo was negative, i.e msb was 1 
++  //    lui t1, t1, %hi(__xray_FunctionEntry/Exit) + 1 else lui t1, t1, %hi(__xray_FunctionEntry/Exit)
++  //    slli t1, t1, 32                                                         ;lui sign extends values to 64 bits
++  //    srli t1, t1, 32                                                         ;ensure that the value remains positive
++  //    addi t1, t1, %lo(__xray_FunctionEntry/Exit)
++  //    or t1, t2, t1
++  //    if lower function id  was negative, i.e msb was 1 
++  //    lui a0, %hi(function_id) + 1 else lui a0, %hi(function_id)
++  //    slli a0, a0, 32                                                         ;lui sign extends values to 64 bits
++  //    srli a0, a0, 32                                                         ;ensure that the value remains positive
++  //    addi a0, a0, %lo(function_id)                                           ;pass function id
++  //    jalr t1                                                                 ;call Tracing hook
++  //    ld a0, 0(sp)                                                            ;restore register a0
++  //    ld t1, 8(sp)                                                            ;restore register t1
++  //    ld t2, 16(sp)                                                           ;restore register t2
++  //    ld ra, 24(sp)                                                           ;restore return address
++  //    addi sp, sp, 32                                                         ;delete stack frame
++  //
++  // Replacement of the first 4-byte instruction should be the last and atomic
++  // operation, so that the user code which reaches the sled concurrently
++  // either jumps over the whole sled, or executes the whole sled when the
++  // latter is ready.
++  //
++  // When |Enable|==false, we set back the first instruction in the sled to be
++  //   J #100 bytes
++
++  uint32_t *Address = reinterpret_cast<uint32_t *>(Sled.address());
++  if (Enable) {
++    uint32_t LoTracingHookAddr =
++        reinterpret_cast<int64_t>(TracingHook) & 0xfff;
++    uint32_t HiTracingHookAddr =
++        (reinterpret_cast<int64_t>(TracingHook) >> 12) & 0xfffff;
++    uint32_t HigherTracingHookAddr =
++        (reinterpret_cast<int64_t>(TracingHook) >> 32) & 0xfff;
++    uint32_t HighestTracingHookAddr =
++        (reinterpret_cast<int64_t>(TracingHook) >> 44) & 0xfffff;
++    uint32_t LoFunctionID = FuncId & 0xfff;
++    uint32_t HiFunctionID = (FuncId >> 12) & 0xfffff;
++    Address[1] = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
++                                   RegNum::RN_RA, 0x18);
++    Address[2] = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
++                                   RegNum::RN_T2, 0x10);
++    Address[3] = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
++                                   RegNum::RN_T1, 0x8);
++    Address[4] = encodeSTypeInstruction(PatchOpcodes::PO_SD, RegNum::RN_SP,
++                                   RegNum::RN_A0, 0x0);
++    if((HigherTracingHookAddr & 0x0800) >> 11) {        // Add 4096
++    	Address[5] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T2,
++        	                           (HighestTracingHookAddr + 1));
++    } else {                                            // Unchanged
++    	Address[5] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T2,
++        	                           HighestTracingHookAddr);
++    }
++    Address[6] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
++                                   RegNum::RN_T2, 0x20);
++    Address[7] = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T2,
++                                   RegNum::RN_T2, 0x20);
++    Address[8] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T2,
++                                   RegNum::RN_T2, HigherTracingHookAddr);
++    Address[9] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
++                                   RegNum::RN_T2, 0x20);
++    if((LoTracingHookAddr & 0x0800) >> 11) {            // Add 4096
++    	Address[10] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
++                	                   (HiTracingHookAddr + 1));
++    } else {                                            // Unchanged
++    	Address[10] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
++                        	           HiTracingHookAddr);
++    }
++    Address[11] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T1,
++                                   RegNum::RN_T1, 0x20);
++    Address[12] = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T1,
++                                   RegNum::RN_T1, 0x20);
++    Address[13] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
++                                   RegNum::RN_T1, LoTracingHookAddr);
++    Address[14] = encodeRTypeInstruction(PatchOpcodes::PO_OR, RegNum::RN_T1, RegNum::RN_T2,
++                                   RegNum::RN_T1);
++    if((LoFunctionID & 0x0800) >> 11) {                 // Add 4096
++    	Address[15] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
++                                	    (HiFunctionID + 1));
++    } else {                                            // Unchanged
++    	Address[15] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
++                                    	HiFunctionID);
++    }
++    Address[16] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_A0,
++                                   RegNum::RN_A0, 0x20);
++    Address[17] = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_A0,
++                                   RegNum::RN_A0, 0x20);
++    Address[18] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_A0,
++                                   RegNum::RN_A0, LoFunctionID);
++    Address[19] = encodeITypeInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T1,
++                                           RegNum::RN_RA, 0x0);
++    Address[20] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
++                                    RegNum::RN_A0, 0x0);
++    Address[21] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
++                                    RegNum::RN_T1, 0x8);
++    Address[22] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
++                                    RegNum::RN_T2, 0x10);
++    Address[23] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
++                                    RegNum::RN_RA, 0x18);
++    Address[24] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
++                                    RegNum::RN_SP, 0x20);
++    uint32_t CreateStackSpace = encodeITypeInstruction(
++        PatchOpcodes::PO_ADDI, RegNum::RN_SP, RegNum::RN_SP, 0xffe0);
++    std::atomic_store_explicit(
++        reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateStackSpace,
++        std::memory_order_release);
++  } else {
++    uint32_t CreateBranch = encodeJTypeInstruction(
++        PatchOpcodes::PO_B, RegNum::RN_R0, 0x03c);				//jump encodes an offset in multiples of 2 bytes. 60*2 = 120
++    std::atomic_store_explicit(
++        reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateBranch,
++        std::memory_order_release);
++  }
++  return true;
++}
++
++bool patchFunctionEntry(const bool Enable, const uint32_t FuncId,
++                        const XRaySledEntry &Sled,
++                        void (*Trampoline)()) XRAY_NEVER_INSTRUMENT {
++  return patchSled(Enable, FuncId, Sled, Trampoline);
++}
++
++bool patchFunctionExit(const bool Enable, const uint32_t FuncId,
++                       const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  return patchSled(Enable, FuncId, Sled, __xray_FunctionExit);
++}
++
++bool patchFunctionTailExit(const bool Enable, const uint32_t FuncId,
++                           const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  // FIXME: Implement tail exits in riscv64
++  return patchSled(Enable, FuncId, Sled, __xray_FunctionExit);
++  //return patchSled(Enable, FuncId, Sled, __xray_FunctionTailExit);
++}
++
++bool patchCustomEvent(const bool Enable, const uint32_t FuncId,
++                      const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  // FIXME: Implement in riscv64?
++  return false;
++}
++
++bool patchTypedEvent(const bool Enable, const uint32_t FuncId,
++                     const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
++  // FIXME: Implement in riscv64?
++  return false;
++}
++} // namespace __xray
++
++extern "C" void __xray_ArgLoggerEntry() XRAY_NEVER_INSTRUMENT {
++  // FIXME: this will have to be implemented in the trampoline assembly file
++}
+diff --git a/compiler-rt/lib/xray/xray_trampoline_riscv32.S b/compiler-rt/lib/xray/xray_trampoline_riscv32.S
+new file mode 100644
+index 000000000000..561878b08c4e
+--- /dev/null
++++ b/compiler-rt/lib/xray/xray_trampoline_riscv32.S
+@@ -0,0 +1,134 @@
++//===-- xray_trampoline_riscv32.s ----------------------------------*- ASM -*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++//
++// This file is a part of XRay, a dynamic runtime instrumentation system.
++//
++// This implements the riscv32-specific assembler for the trampolines.
++//
++//===----------------------------------------------------------------------===//
++
++	.text
++	.file "xray_trampoline_riscv32.S"
++	.globl __xray_FunctionEntry
++	.p2align 2
++	.type __xray_FunctionEntry,@function
++__xray_FunctionEntry:
++	.cfi_startproc
++	// Push argument registers to stack
++	addi	sp, sp, -100
++	.cfi_def_cfa_offset 100
++	sw	ra, 96(sp)
++	.cfi_offset ra, -8
++	sw	a7, 92(sp)
++	sw	a6, 88(sp)
++	sw	a5, 84(sp)
++	sw	a4, 80(sp)
++	sw	a3, 76(sp)
++	sw	a2, 72(sp)
++	sw	a1, 68(sp)
++	sw	a0, 64(sp)
++	// If this is RISCV32F, then these (faX) will still be 32 bit 
++	// wide registers, so we should be incrementing by 4
++	// Perhaps we can push a registers based on defines which
++	// indicate if we are following RISCV32I, IF or IFD
++	// We will need the same for rv64 as well
++	fsd	fa7, 56(sp)
++	fsd	fa6, 48(sp)
++	fsd	fa5, 40(sp)
++	fsd	fa4, 32(sp)
++	fsd	fa3, 24(sp)
++	fsd	fa2, 16(sp)
++	fsd	fa1, 8(sp)
++	fsd	fa0, 0(sp)
++
++	// Load the handler function pointer into a2
++	li	a2, _ZN6__xray19XRayPatchedFunctionE
++	lw	a2, 0(a2)
++
++	// Handler address will be null if it is not set
++	beq	a2, x0, FunctionEntry_restore
++
++	// If we reach here, we are tracing an event
++	// a0 already contains function id
++	// a1 = 0 means we are tracing an entry event
++	mv	a1, x0
++	jalr	a2
++
++FunctionEntry_restore:
++	// Restore argument registers
++	fld	fa0, 0(sp)
++	fld	fa1, 8(sp)
++	fld	fa2, 16(sp)
++	fld	fa3, 24(sp)
++	fld	fa4, 32(sp)
++	fld	fa5, 40(sp)
++	fld	fa6, 48(sp)
++	fld	fa7, 56(sp)
++	lw	a0, 64(sp)
++	lw	a1, 68(sp)
++	lw	a2, 72(sp)
++	lw	a3, 76(sp)
++	lw	a4, 80(sp)
++	lw	a5, 84(sp)
++	lw	a6, 88(sp)
++	lw	a7, 92(sp)
++	lw	ra, 96(sp)
++	addi	sp, sp, 100
++	jr	ra
++
++FunctionEntry_end:
++	.size __xray_FunctionEntry, FunctionEntry_end-__xray_FunctionEntry
++	.cfi_endproc
++
++	.text
++	.globl __xray_FunctionExit
++	.p2align 2
++	.type __xray_FunctionExit,@function
++__xray_FunctionExit:
++	.cfi_startproc
++	// Push return registers to stack
++	addi	sp, sp, -28
++	.cfi_def_cfa_offset 28
++	sw	ra, 24(sp)
++	.cfi_offset ra, -8
++	sw	a1, 20(sp)
++	sw	a0, 16(sp)
++	// If this is RISCV32F, then these (faX) will still be 32 bit 
++	// wide registers, so we should be incrementing by 4
++	// Perhaps we can push a registers based on defines which
++	// indicate if we are following RISCV32I, IF or IFD
++	// We will need the same for rv64 as well
++	fsd	fa1, 8(sp)
++	fsd	fa0, 0(sp)
++
++	// Load the handler function pointer into a2 - similar thoughts as above
++	li	a2, _ZN6__xray19XRayPatchedFunctionE
++
++	// Handler address will be null if it is not set
++	beq	a2, x0, FunctionExit_restore
++	lw	a2, 0(a2)
++
++	// If we reach here, we are tracing an event
++	// a0 already contains function id
++	// a1 = 1 means we are tracing an exit event
++	addi	a1, x0, 1
++	jalr	a2
++
++FunctionExit_restore:
++	// Restore return registers
++	fld	fa0, 0(sp)
++	fld	fa1, 8(sp)
++	lw	a0, 16(sp)
++	lw	a1, 20(sp)
++	lw	ra, 24(sp)
++	addi	sp, sp, 28
++	jr	ra
++
++FunctionExit_end:
++	.size __xray_FunctionExit, FunctionExit_end-__xray_FunctionExit
++	.cfi_endproc
+diff --git a/compiler-rt/lib/xray/xray_trampoline_riscv64.S b/compiler-rt/lib/xray/xray_trampoline_riscv64.S
+new file mode 100644
+index 000000000000..284e2a655680
+--- /dev/null
++++ b/compiler-rt/lib/xray/xray_trampoline_riscv64.S
+@@ -0,0 +1,124 @@
++//===-- xray_trampoline_riscv64.s ----------------------------------*- ASM -*-===//
++//
++// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
++// See https://llvm.org/LICENSE.txt for license information.
++// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
++//
++//===----------------------------------------------------------------------===//
++//
++// This file is a part of XRay, a dynamic runtime instrumentation system.
++//
++// This implements the riscv64-specific assembler for the trampolines.
++//
++//===----------------------------------------------------------------------===//
++
++	.text
++	.file "xray_trampoline_riscv64.S"
++	.globl __xray_FunctionEntry
++	.p2align 2
++	.type __xray_FunctionEntry,@function
++__xray_FunctionEntry:
++	.cfi_startproc
++	// Push argument registers to stack
++	addi	sp, sp, -136
++	.cfi_def_cfa_offset 136
++	sd	ra, 128(sp)
++	.cfi_offset ra, -8
++	sd	a7, 120(sp)
++	sd	a6, 112(sp)
++	sd	a5, 104(sp)
++	sd	a4, 96(sp)
++	sd	a3, 88(sp)
++	sd	a2, 80(sp)
++	sd	a1, 72(sp)
++	sd	a0, 64(sp)
++	fsd	fa7, 56(sp)
++	fsd	fa6, 48(sp)
++	fsd	fa5, 40(sp)
++	fsd	fa4, 32(sp)
++	fsd	fa3, 24(sp)
++	fsd	fa2, 16(sp)
++	fsd	fa1, 8(sp)
++	fsd	fa0, 0(sp)
++
++	// Load the handler function pointer into a2
++	la	a2, _ZN6__xray19XRayPatchedFunctionE
++	ld	a2, 0(a2)
++
++	// Handler address will be null if it is not set
++	beq	a2, x0, FunctionEntry_restore
++
++	// If we reach here, we are tracing an event
++	// a0 already contains function id
++	// a1 = 0 means we are tracing an entry event
++	mv	a1, x0
++	jalr	a2
++
++FunctionEntry_restore:
++	// Restore argument registers
++	fld	fa0, 0(sp)
++	fld	fa1, 8(sp)
++	fld	fa2, 16(sp)
++	fld	fa3, 24(sp)
++	fld	fa4, 32(sp)
++	fld	fa5, 40(sp)
++	fld	fa6, 48(sp)
++	fld	fa7, 56(sp)
++	ld	a0, 64(sp)
++	ld	a1, 72(sp)
++	ld	a2, 80(sp)
++	ld	a3, 88(sp)
++	ld	a4, 96(sp)
++	ld	a5, 104(sp)
++	ld	a6, 112(sp)
++	ld	a7, 120(sp)
++	ld	ra, 128(sp)
++	addi	sp, sp, 136
++	jr	ra
++
++FunctionEntry_end:
++	.size __xray_FunctionEntry, FunctionEntry_end-__xray_FunctionEntry
++	.cfi_endproc
++
++	.text
++	.globl __xray_FunctionExit
++	.p2align 2
++	.type __xray_FunctionExit,@function
++__xray_FunctionExit:
++	.cfi_startproc
++	// Push return registers to stack
++	addi	sp, sp, -40
++	.cfi_def_cfa_offset 40
++	sd	ra, 32(sp)
++	.cfi_offset ra, -8
++	sd	a1, 24(sp)
++	sd	a0, 16(sp)
++	fsd	fa1, 8(sp)
++	fsd	fa0, 0(sp)
++
++	// Load the handler function pointer into a2 - similar thoughts as above
++	la	a2, _ZN6__xray19XRayPatchedFunctionE
++	ld	a2, 0(a2)
++
++	// Handler address will be null if it is not set
++	beq	a2, x0, FunctionExit_restore
++
++	// If we reach here, we are tracing an event
++	// a0 already contains function id
++	// a1 = 1 means we are tracing an exit event
++	addi	a1, x0, 1
++	jalr	a2
++
++FunctionExit_restore:
++	// Restore return registers
++	fld	fa0, 0(sp)
++	fld	fa1, 8(sp)
++	ld	a0, 16(sp)
++	ld	a1, 24(sp)
++	ld	ra, 32(sp)
++	addi	sp, sp, 40
++	jr	ra
++
++FunctionExit_end:
++	.size __xray_FunctionExit, FunctionExit_end-__xray_FunctionExit
++	.cfi_endproc
+diff --git a/compiler-rt/lib/xray/xray_tsc.h b/compiler-rt/lib/xray/xray_tsc.h
+index 58347dca5f7a..baa9e2d1337b 100644
+--- a/compiler-rt/lib/xray/xray_tsc.h
++++ b/compiler-rt/lib/xray/xray_tsc.h
+@@ -43,7 +43,7 @@ inline uint64_t getTSCFrequency() XRAY_NEVER_INSTRUMENT {
+ #elif defined(__powerpc64__)
+ #include "xray_powerpc64.inc"
+ #elif defined(__arm__) || defined(__aarch64__) || defined(__mips__) ||         \
+-    defined(__hexagon__)
++    defined(__hexagon__) || defined(__riscv)
+ // Emulated TSC.
+ // There is no instruction like RDTSCP in user mode on ARM. ARM's CP15 does
+ //   not have a constant frequency like TSC on x86(_64), it may go faster
+diff --git a/llvm/lib/CodeGen/XRayInstrumentation.cpp b/llvm/lib/CodeGen/XRayInstrumentation.cpp
+index b66429d8a5bf..133e03d841d4 100644
+--- a/llvm/lib/CodeGen/XRayInstrumentation.cpp
++++ b/llvm/lib/CodeGen/XRayInstrumentation.cpp
+@@ -230,7 +230,9 @@ bool XRayInstrumentation::runOnMachineFunction(MachineFunction &MF) {
+     case Triple::ArchType::mips:
+     case Triple::ArchType::mipsel:
+     case Triple::ArchType::mips64:
+-    case Triple::ArchType::mips64el: {
++    case Triple::ArchType::mips64el:
++    //case Triple::ArchType::riscv32:
++    case Triple::ArchType::riscv64: {
+       // For the architectures which don't have a single return instruction
+       InstrumentationOptions op;
+       op.HandleTailcall = false;
+diff --git a/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp b/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
+index 9fed6e7baadc..27f173dca460 100644
+--- a/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
++++ b/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
+@@ -16,6 +16,7 @@
+ #include "MCTargetDesc/RISCVTargetStreamer.h"
+ #include "RISCV.h"
+ #include "RISCVTargetMachine.h"
++#include "RISCVSubtarget.h"
+ #include "TargetInfo/RISCVTargetInfo.h"
+ #include "llvm/ADT/Statistic.h"
+ #include "llvm/CodeGen/AsmPrinter.h"
+@@ -25,10 +26,12 @@
+ #include "llvm/CodeGen/MachineModuleInfo.h"
+ #include "llvm/MC/MCAsmInfo.h"
+ #include "llvm/MC/MCInst.h"
++#include "llvm/MC/MCInstBuilder.h"
+ #include "llvm/MC/MCStreamer.h"
+ #include "llvm/MC/MCSymbol.h"
+ #include "llvm/MC/TargetRegistry.h"
+ #include "llvm/Support/raw_ostream.h"
++#include <cstdint>
+ using namespace llvm;
+ 
+ #define DEBUG_TYPE "asm-printer"
+@@ -65,11 +68,18 @@ public:
+     return LowerRISCVMachineOperandToMCOperand(MO, MCOp, *this);
+   }
+ 
++  // XRay Support
++  void LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr *MI);
++  void LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr *MI);
++  void LowerPATCHABLE_TAIL_CALL(const MachineInstr *MI);
++
+   void emitStartOfAsmFile(Module &M) override;
+   void emitEndOfAsmFile(Module &M) override;
+ 
+ private:
+   void emitAttributes();
++  // XRay Support
++  void emitSled(const MachineInstr *MI, SledKind Kind);
+ };
+ }
+ 
+@@ -92,6 +102,36 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
+   if (emitPseudoExpansionLowering(*OutStreamer, MI))
+     return;
+ 
++  // Handle XRay sleds while keeping changes minimal to avoid breaking functionality
++  switch (MI->getOpcode()) {
++  case TargetOpcode::PATCHABLE_FUNCTION_ENTER: {
++    // patchable-function-entry is handled in lowerRISCVMachineInstrToMCInst
++    // Therefore, we break out of the switch statement if we encounter it here.
++    // 
++    // This switch case section is only for patching XRay sleds, though it could
++    // handle cases covered by the aforementioned lowerRISCVMachineInstrtoMCInst
++    // function, though that would require changes to both files, and possibly RISCV.h. 
++    //
++    // XRay could be handled within the lowerRISCVMachineInstrtoMCInst function,
++    // but that will require significant changes to be made.
++    const Function &F = MI->getParent()->getParent()->getFunction();
++    if (F.hasFnAttribute("patchable-function-entry")) {
++      break;
++    }
++
++    LowerPATCHABLE_FUNCTION_ENTER(MI);
++    return;
++  }
++  case TargetOpcode::PATCHABLE_FUNCTION_EXIT: {
++    LowerPATCHABLE_FUNCTION_EXIT(MI);
++    return;
++  }
++  case TargetOpcode::PATCHABLE_TAIL_CALL: {
++    LowerPATCHABLE_TAIL_CALL(MI);
++    return;
++  }
++  }
++
+   MCInst TmpInst;
+   if (!lowerRISCVMachineInstrToMCInst(MI, TmpInst, *this))
+     EmitToStreamer(*OutStreamer, TmpInst);
+@@ -174,9 +214,24 @@ bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
+ 
+   SetupMachineFunction(MF);
+   emitFunctionBody();
++
++  // Emit the XRay table
++  emitXRayTable();
+   return false;
+ }
+ 
++void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr *MI) {
++  emitSled(MI, SledKind::FUNCTION_ENTER);
++}
++
++void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr *MI) {
++  emitSled(MI, SledKind::FUNCTION_EXIT);
++}
++
++void RISCVAsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr *MI) {
++  emitSled(MI, SledKind::TAIL_CALL);
++}
++
+ void RISCVAsmPrinter::emitStartOfAsmFile(Module &M) {
+   if (TM.getTargetTriple().isOSBinFormatELF())
+     emitAttributes();
+@@ -196,6 +251,42 @@ void RISCVAsmPrinter::emitAttributes() {
+   RTS.emitTargetAttributes(*STI);
+ }
+ 
++void RISCVAsmPrinter::emitSled(const MachineInstr *MI, SledKind Kind) {
++  const uint8_t NoopsInSledCount = MI->getParent()->getParent()->getSubtarget<RISCVSubtarget>().is64Bit() ? 24 : 14;
++  // We want to emit the jump instruction and the nops
++  // constituting the sled. The format will be similar
++  // .Lxray_sled_N
++  //   ALIGN
++  //   J #100 or #60 bytes (depending on ISA)
++  //   29 or 18 NOP instructions
++  // .tmpN
++  OutStreamer->emitCodeAlignment(4, &getSubtargetInfo());
++  auto CurSled = OutContext.createTempSymbol("xray_sled_", true);
++  OutStreamer->emitLabel(CurSled);
++  auto Target = OutContext.createTempSymbol();
++
++  const MCExpr *TargetExpr = MCSymbolRefExpr::create(
++      Target, MCSymbolRefExpr::VariantKind::VK_None, OutContext);
++  // Emit "J #bytes" instruction, which jumps over the nop sled to the actual
++  // start of function. I wasn't sure which immediate to add, therefore used
++  // addExpr to the Target label, which is also more readable.
++  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::JAL)
++		                   .addReg(RISCV::X0)
++		                   .addExpr(TargetExpr));
++		                   //.addImm(NoopsInSledCount*4));
++		                   //.addImm(NoopsInSledCount*2));
++
++  // Emit NOP instructions
++  for (int8_t I = 0; I < NoopsInSledCount; I++)
++	  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
++			                   .addReg(RISCV::X0)
++			                   .addReg(RISCV::X0)
++		                           .addImm(0));
++
++  OutStreamer->emitLabel(Target);
++  recordSled(CurSled, *MI, Kind, 2);
++}
++
+ // Force static initialization.
+ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVAsmPrinter() {
+   RegisterAsmPrinter<RISCVAsmPrinter> X(getTheRISCV32Target());
+diff --git a/llvm/lib/Target/RISCV/RISCVSubtarget.h b/llvm/lib/Target/RISCV/RISCVSubtarget.h
+index 0613166d1d0f..02e2855fb4d5 100644
+--- a/llvm/lib/Target/RISCV/RISCVSubtarget.h
++++ b/llvm/lib/Target/RISCV/RISCVSubtarget.h
+@@ -187,6 +187,10 @@ public:
+   unsigned getMaxInterleaveFactor() const {
+     return hasVInstructions() ? MaxInterleaveFactor : 1;
+   }
++  // Add XRay support - needs double precision floats at present
++  bool isXRaySupported() const override { 
++    return hasStdExtD(); 
++  }
+ 
+ protected:
+   // GlobalISel related APIs.
+diff --git a/llvm/test/CodeGen/RISCV/xray-attribute-instrumentation.ll b/llvm/test/CodeGen/RISCV/xray-attribute-instrumentation.ll
+new file mode 100644
+index 000000000000..dd57b45e4ca9
+--- /dev/null
++++ b/llvm/test/CodeGen/RISCV/xray-attribute-instrumentation.ll
+@@ -0,0 +1,70 @@
++; RUN: llc -filetype=asm -o - -mtriple=riscv32-unknown-elf < %s | FileCheck --check-prefix=CHECK %s
++; RUN: llc -filetype=asm -o - -mtriple=riscv32-unknown-linux-gnu  < %s | FileCheck --check-prefix=CHECK %s
++; RUN: llc -filetype=asm -o - -mtriple=riscv64-unknown-elf < %s | FileCheck --check-prefix=CHECK --check-prefix=CHECK-RISCV64 %s
++; RUN: llc -filetype=asm -o - -mtriple=riscv64-unknown-linux-gnu  < %s | FileCheck --check-prefix=CHECK --check-prefix=CHECK-RISCV64 %s
++
++define i32 @foo() nounwind noinline uwtable "function-instrument"="xray-always" {
++; CHECK:		.p2align 2
++; CHECK-LABEL:		.Lxray_sled_0:
++; CHECK-NEXT:		j .Ltmp0
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-LABEL:		.Ltmp0:
++  ret i32 0
++; CHECK:		.p2align 2
++; CHECK-LABEL:		.Lxray_sled_1:
++; CHECK-NEXT:		j .Ltmp1
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-NEXT:  		nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-RISCV64:	nop
++; CHECK-LABEL:		.Ltmp1:
++; CHECK-NEXT:  		ret
++}
++; CHECK:		.section xray_instr_map,{{.*}}
++; CHECK-LABEL:		.Lxray_sleds_start0:
++; CHECK:		.Lxray_sled_0-.Ltmp{{.*}}
++; CHECK:		.Lxray_sled_1-.Ltmp{{.*}}
++; CHECK-LABEL:		.Lxray_sleds_end0:

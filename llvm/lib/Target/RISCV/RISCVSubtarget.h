@@ -145,7 +145,7 @@ public:
   }
   // Add XRay support
   bool isXRaySupported() const override { 
-    return true; 
+    return hasStdExtD(); 
   }
 
 protected:
