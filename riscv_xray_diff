@@ -71,10 +71,10 @@ index 73e67618c9d5..2ba2504e6fe2 100644
  #endif /* CPU architecture */
 diff --git a/compiler-rt/lib/xray/xray_riscv.cpp b/compiler-rt/lib/xray/xray_riscv.cpp
 new file mode 100644
-index 000000000000..1ee479e2bec5
+index 000000000000..30430cabc50c
 --- /dev/null
 +++ b/compiler-rt/lib/xray/xray_riscv.cpp
-@@ -0,0 +1,296 @@
+@@ -0,0 +1,299 @@
 +//===-- xray_riscv.cpp ----------------------------------------*- C++ -*-===//
 +//
 +// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -230,7 +230,10 @@ index 000000000000..1ee479e2bec5
 +    uint32_t HigherTracingHookAddr =
 +        (reinterpret_cast<int64_t>(TracingHook + 0x80000000) >> 32) & 0xfff;
 +    uint32_t HighestTracingHookAddr =
-+        (reinterpret_cast<int64_t>(((TracingHook + 0x80000000) >> 32) + 0x800) >> 12) & 0xfffff;
++        (reinterpret_cast<int64_t>(((TracingHook + 0x80000000) >> 32) +
++                                   0x800) >>
++         12) &
++        0xfffff;
 +    // We typecast the Tracing Hook to a 32 bit value for RISCV32
 +#elif defined(__riscv) && (__riscv_xlen == 32)
 +    uint32_t LoTracingHookAddr = reinterpret_cast<int32_t>(TracingHook) & 0xfff;
@@ -261,9 +264,9 @@ index 000000000000..1ee479e2bec5
 +    Address[7] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
 +                                        RegNum::RN_T2, 0x20);
 +    Address[8] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
-+                                         HiTracingHookAddr);
++                                        HiTracingHookAddr);
 +    Address[9] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
-+                                         RegNum::RN_T1, LoTracingHookAddr);
++                                        RegNum::RN_T1, LoTracingHookAddr);
 +    Address[10] = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T1,
 +                                         RegNum::RN_T2, RegNum::RN_T1);
 +    Address[11] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
