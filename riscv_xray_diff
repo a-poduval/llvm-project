@@ -55,7 +55,7 @@ index ca9389747a5e..d23d25ee77bd 100644
    )
  list(REMOVE_DUPLICATES XRAY_ALL_SOURCE_FILES)
 diff --git a/compiler-rt/lib/xray/xray_interface.cpp b/compiler-rt/lib/xray/xray_interface.cpp
-index 73e67618c9d5..50d925707891 100644
+index 73e67618c9d5..2ba2504e6fe2 100644
 --- a/compiler-rt/lib/xray/xray_interface.cpp
 +++ b/compiler-rt/lib/xray/xray_interface.cpp
 @@ -54,6 +54,10 @@ static const int16_t cSledLength = 64;
@@ -63,7 +63,7 @@ index 73e67618c9d5..50d925707891 100644
  #elif defined(__hexagon__)
  static const int16_t cSledLength = 20;
 +#elif SANITIZER_RISCV64
-+static const int16_t cSledLength = 100;
++static const int16_t cSledLength = 76;
 +#elif defined(__riscv) && (__riscv_xlen == 32)
 +static const int16_t cSledLength = 60;
  #else
@@ -71,10 +71,10 @@ index 73e67618c9d5..50d925707891 100644
  #endif /* CPU architecture */
 diff --git a/compiler-rt/lib/xray/xray_riscv.cpp b/compiler-rt/lib/xray/xray_riscv.cpp
 new file mode 100644
-index 000000000000..1c264880313e
+index 000000000000..1ee479e2bec5
 --- /dev/null
 +++ b/compiler-rt/lib/xray/xray_riscv.cpp
-@@ -0,0 +1,314 @@
+@@ -0,0 +1,296 @@
 +//===-- xray_riscv.cpp ----------------------------------------*- C++ -*-===//
 +//
 +// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -167,7 +167,7 @@ index 000000000000..1c264880313e
 +  //
 +  // xray_sled_n:
 +  //	J .tmpN
-+  //	14 or 24 NOPs (56 or 96 bytes)
++  //	14 or 18 NOPs (56 or 72 bytes)
 +  //	.tmpN
 +  //
 +  // With one of the following runtime patches:
@@ -196,18 +196,12 @@ index 000000000000..1c264880313e
 +  //    sd t1, 8(sp)                                    ;save register t1
 +  //    sd a0, 0(sp)                                    ;save register a0
 +  //    lui t2, %highest(__xray_FunctionEntry/Exit)
-+  //    slli t2, t2, 32                                 ;lui sign extends values
-+  //    srli t2, t2, 32                                 ;set upper 32 bits to 0
 +  //    addi t2, t2, %higher(__xray_FunctionEntry/Exit)
 +  //    slli t2, t2, 32
 +  //    lui t1, t1, %hi(__xray_FunctionEntry/Exit)
-+  //    slli t1, t1, 32                                 ;lui sign extends values
-+  //    srli t1, t1, 32                                 ;set upper 32 bits to 0
 +  //    addi t1, t1, %lo(__xray_FunctionEntry/Exit)
-+  //    or t1, t2, t1
++  //    add t1, t2, t1
 +  //    lui a0, %hi(function_id)
-+  //    slli a0, a0, 32                                 ;lui sign extends values
-+  //    srli a0, a0, 32                                 ;set upper 32 bits to 0
 +  //    addi a0, a0, %lo(function_id)                   ;pass function id
 +  //    jalr t1                                         ;call Tracing hook
 +  //    ld a0, 0(sp)                                    ;restore register a0
@@ -223,7 +217,7 @@ index 000000000000..1c264880313e
 +  //
 +  // When |Enable|==false, we set back the first instruction in the sled to be
 +  //   J 60 bytes (rv32)
-+  //   J 100 bytes (rv64)
++  //   J 76 bytes (rv64)
 +
 +  uint32_t *Address = reinterpret_cast<uint32_t *>(Sled.address());
 +  if (Enable) {
@@ -234,9 +228,9 @@ index 000000000000..1c264880313e
 +    uint32_t HiTracingHookAddr =
 +        (reinterpret_cast<int64_t>(TracingHook + 0x800) >> 12) & 0xfffff;
 +    uint32_t HigherTracingHookAddr =
-+        (reinterpret_cast<int64_t>(TracingHook) >> 32) & 0xfff;
++        (reinterpret_cast<int64_t>(TracingHook + 0x80000000) >> 32) & 0xfff;
 +    uint32_t HighestTracingHookAddr =
-+        (reinterpret_cast<int64_t>(TracingHook + 0x800) >> 44) & 0xfffff;
++        (reinterpret_cast<int64_t>(((TracingHook + 0x80000000) >> 32) + 0x800) >> 12) & 0xfffff;
 +    // We typecast the Tracing Hook to a 32 bit value for RISCV32
 +#elif defined(__riscv) && (__riscv_xlen == 32)
 +    uint32_t LoTracingHookAddr = reinterpret_cast<int32_t>(TracingHook) & 0xfff;
@@ -262,43 +256,31 @@ index 000000000000..1c264880313e
 +                                        RegNum::RN_A0, 0x0);
 +    Address[5] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T2,
 +                                        HighestTracingHookAddr);
-+    Address[6] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
-+                                        RegNum::RN_T2, 0x20);
-+    Address[7] = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T2,
-+                                        RegNum::RN_T2, 0x20);
-+    Address[8] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T2,
++    Address[6] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T2,
 +                                        RegNum::RN_T2, HigherTracingHookAddr);
-+    Address[9] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
++    Address[7] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T2,
 +                                        RegNum::RN_T2, 0x20);
-+    Address[10] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
++    Address[8] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_T1,
 +                                         HiTracingHookAddr);
-+    Address[11] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_T1,
-+                                         RegNum::RN_T1, 0x20);
-+    Address[12] = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_T1,
-+                                         RegNum::RN_T1, 0x20);
-+    Address[13] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
++    Address[9] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_T1,
 +                                         RegNum::RN_T1, LoTracingHookAddr);
-+    Address[14] = encodeRTypeInstruction(PatchOpcodes::PO_OR, RegNum::RN_T1,
++    Address[10] = encodeRTypeInstruction(PatchOpcodes::PO_ADD, RegNum::RN_T1,
 +                                         RegNum::RN_T2, RegNum::RN_T1);
-+    Address[15] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
++    Address[11] = encodeUTypeInstruction(PatchOpcodes::PO_LUI, RegNum::RN_A0,
 +                                         HiFunctionID);
-+    Address[16] = encodeITypeInstruction(PatchOpcodes::PO_SLLI, RegNum::RN_A0,
-+                                         RegNum::RN_A0, 0x20);
-+    Address[17] = encodeITypeInstruction(PatchOpcodes::PO_SRLI, RegNum::RN_A0,
-+                                         RegNum::RN_A0, 0x20);
-+    Address[18] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_A0,
++    Address[12] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_A0,
 +                                         RegNum::RN_A0, LoFunctionID);
-+    Address[19] = encodeITypeInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T1,
++    Address[13] = encodeITypeInstruction(PatchOpcodes::PO_JALR, RegNum::RN_T1,
 +                                         RegNum::RN_RA, 0x0);
-+    Address[20] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
++    Address[14] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
 +                                         RegNum::RN_A0, 0x0);
-+    Address[21] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
++    Address[15] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
 +                                         RegNum::RN_T1, 0x8);
-+    Address[22] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
++    Address[16] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
 +                                         RegNum::RN_T2, 0x10);
-+    Address[23] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
++    Address[17] = encodeITypeInstruction(PatchOpcodes::PO_LD, RegNum::RN_SP,
 +                                         RegNum::RN_RA, 0x18);
-+    Address[24] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
++    Address[18] = encodeITypeInstruction(PatchOpcodes::PO_ADDI, RegNum::RN_SP,
 +                                         RegNum::RN_SP, 0x20);
 +    uint32_t CreateStackSpace = encodeITypeInstruction(
 +        PatchOpcodes::PO_ADDI, RegNum::RN_SP, RegNum::RN_SP, 0xffe0);
@@ -343,7 +325,7 @@ index 000000000000..1c264880313e
 +    // sleds
 +#if SANITIZER_RISCV64
 +        PatchOpcodes::PO_J, RegNum::RN_R0,
-+        0x03c); // jump encodes an offset in multiples of 2 bytes. 60*2 = 120
++        0x026); // jump encodes an offset in multiples of 2 bytes. 38*2 = 76
 +#elif defined(__riscv) && (__riscv_xlen == 32)
 +        PatchOpcodes::PO_J, RegNum::RN_R0,
 +        0x01e); // jump encodes an offset in multiples of 2 bytes. 30*2 = 60
@@ -684,7 +666,7 @@ index b66429d8a5bf..4b8f721cec43 100644
        InstrumentationOptions op;
        op.HandleTailcall = false;
 diff --git a/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp b/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
-index 9fed6e7baadc..1d94dcd3454c 100644
+index 9fed6e7baadc..4ce3e2042e8d 100644
 --- a/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
 +++ b/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
 @@ -15,6 +15,7 @@
@@ -708,7 +690,7 @@ index 9fed6e7baadc..1d94dcd3454c 100644
  using namespace llvm;
  
  #define DEBUG_TYPE "asm-printer"
-@@ -65,13 +68,20 @@ public:
+@@ -65,11 +68,18 @@ public:
      return LowerRISCVMachineOperandToMCOperand(MO, MCOp, *this);
    }
  
@@ -725,11 +707,8 @@ index 9fed6e7baadc..1d94dcd3454c 100644
 +  // XRay Support
 +  void emitSled(const MachineInstr *MI, SledKind Kind);
  };
--}
-+} // namespace
+ }
  
- #define GEN_COMPRESS_INSTR
- #include "RISCVGenCompressInstEmitter.inc"
 @@ -92,6 +102,38 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
    if (emitPseudoExpansionLowering(*OutStreamer, MI))
      return;
@@ -769,14 +748,7 @@ index 9fed6e7baadc..1d94dcd3454c 100644
    MCInst TmpInst;
    if (!lowerRISCVMachineInstrToMCInst(MI, TmpInst, *this))
      EmitToStreamer(*OutStreamer, TmpInst);
-@@ -168,15 +210,30 @@ bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
-   // Set the current MCSubtargetInfo to a copy which has the correct
-   // feature bits for the current MachineFunction
-   MCSubtargetInfo &NewSTI =
--    OutStreamer->getContext().getSubtargetCopy(*TM.getMCSubtargetInfo());
-+      OutStreamer->getContext().getSubtargetCopy(*TM.getMCSubtargetInfo());
-   NewSTI.setFeatureBits(MF.getSubtarget().getFeatureBits());
-   STI = &NewSTI;
+@@ -174,9 +216,24 @@ bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
  
    SetupMachineFunction(MF);
    emitFunctionBody();
@@ -807,19 +779,19 @@ index 9fed6e7baadc..1d94dcd3454c 100644
  
 +void RISCVAsmPrinter::emitSled(const MachineInstr *MI, SledKind Kind) {
 +  // The following variable holds the count of the number of NOPs to be patched
-+  // in for XRay instrumentation during compilation. RISCV64 needs 24 NOPs,
++  // in for XRay instrumentation during compilation. RISCV64 needs 18 NOPs,
 +  // RISCV32 needs 14 NOPs.
 +  const uint8_t NoopsInSledCount =
 +      MI->getParent()->getParent()->getSubtarget<RISCVSubtarget>().is64Bit()
-+          ? 24
++          ? 18
 +          : 14;
 +
 +  // We want to emit the jump instruction and the nops constituting the sled.
 +  // The format is as follows:
 +  // .Lxray_sled_N
 +  //   ALIGN
-+  //   J .tmpN (60 or 100 byte jump, depending on ISA)
-+  //   14 or 24 NOP instructions
++  //   J .tmpN (60 or 76 byte jump, depending on ISA)
++  //   14 or 18 NOP instructions
 +  // .tmpN
 +
 +  OutStreamer->emitCodeAlignment(4, &getSubtargetInfo());
@@ -851,25 +823,27 @@ index 9fed6e7baadc..1d94dcd3454c 100644
  extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVAsmPrinter() {
    RegisterAsmPrinter<RISCVAsmPrinter> X(getTheRISCV32Target());
 diff --git a/llvm/lib/Target/RISCV/RISCVSubtarget.h b/llvm/lib/Target/RISCV/RISCVSubtarget.h
-index 0613166d1d0f..0c24a9a172a2 100644
+index 0613166d1d0f..0afe758900f6 100644
 --- a/llvm/lib/Target/RISCV/RISCVSubtarget.h
 +++ b/llvm/lib/Target/RISCV/RISCVSubtarget.h
-@@ -187,6 +187,9 @@ public:
+@@ -187,6 +187,11 @@ public:
    unsigned getMaxInterleaveFactor() const {
      return hasVInstructions() ? MaxInterleaveFactor : 1;
    }
 +  // Add XRay support - needs double precision floats at present and does not
-+  // support compression
-+  bool isXRaySupported() const override { return hasStdExtD() && !hasStdExtC(); }
++  // support compressed instructions
++  bool isXRaySupported() const override {
++    return hasStdExtD() && !hasStdExtC();
++  }
  
  protected:
    // GlobalISel related APIs.
 diff --git a/llvm/test/CodeGen/RISCV/xray-attribute-instrumentation.ll b/llvm/test/CodeGen/RISCV/xray-attribute-instrumentation.ll
 new file mode 100644
-index 000000000000..35806642c399
+index 000000000000..5034f1198a81
 --- /dev/null
 +++ b/llvm/test/CodeGen/RISCV/xray-attribute-instrumentation.ll
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,58 @@
 +; RUN: llc -mtriple=riscv32-unknown-elf -mattr=+d -verify-machineinstrs < %s | FileCheck --check-prefix=CHECK %s
 +; RUN: llc -mtriple=riscv32-unknown-linux-gnu -mattr=+d -verify-machineinstrs < %s | FileCheck --check-prefix=CHECK %s
 +; RUN: llc -mtriple=riscv64-unknown-elf -mattr=+d -verify-machineinstrs < %s | FileCheck --check-prefix=CHECK --check-prefix=CHECK-RISCV64 %s
@@ -897,12 +871,6 @@ index 000000000000..35806642c399
 +; CHECK-RISCV64:        nop
 +; CHECK-RISCV64:        nop
 +; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
 +; CHECK-LABEL:          .Ltmp0:
 +  ret i32 0
 +; CHECK:                .p2align 2
@@ -922,12 +890,6 @@ index 000000000000..35806642c399
 +; CHECK-NEXT:           nop
 +; CHECK-NEXT:           nop
 +; CHECK-NEXT:           nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
-+; CHECK-RISCV64:        nop
 +; CHECK-RISCV64:        nop
 +; CHECK-RISCV64:        nop
 +; CHECK-RISCV64:        nop
