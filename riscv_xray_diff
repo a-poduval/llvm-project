@@ -71,7 +71,7 @@ index 73e67618c9d5..2ba2504e6fe2 100644
  #endif /* CPU architecture */
 diff --git a/compiler-rt/lib/xray/xray_riscv.cpp b/compiler-rt/lib/xray/xray_riscv.cpp
 new file mode 100644
-index 000000000000..50f3a5581f59
+index 000000000000..1ed3e0cf9ce4
 --- /dev/null
 +++ b/compiler-rt/lib/xray/xray_riscv.cpp
 @@ -0,0 +1,296 @@
@@ -228,7 +228,7 @@ index 000000000000..50f3a5581f59
 +    uint32_t HiTracingHookAddr =
 +        ((reinterpret_cast<int64_t>(TracingHook) + 0x800) >> 12) & 0xfffff;
 +    uint32_t HigherTracingHookAddr =
-+        (((reinterpret_cast<int64_t>(TracingHook) + 0x80000000) >> 32) & 0xfff;
++        ((reinterpret_cast<int64_t>(TracingHook) + 0x80000000) >> 32) & 0xfff;
 +    uint32_t HighestTracingHookAddr =
 +        ((((reinterpret_cast<int64_t>(TracingHook) + 0x80000000) >> 32) + 0x800) >> 12) & 0xfffff;
 +    // We typecast the Tracing Hook to a 32 bit value for RISCV32
