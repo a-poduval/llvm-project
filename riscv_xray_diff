@@ -71,10 +71,10 @@ index 73e67618c9d5..2ba2504e6fe2 100644
  #endif /* CPU architecture */
 diff --git a/compiler-rt/lib/xray/xray_riscv.cpp b/compiler-rt/lib/xray/xray_riscv.cpp
 new file mode 100644
-index 000000000000..1ed3e0cf9ce4
+index 000000000000..b8da621da20e
 --- /dev/null
 +++ b/compiler-rt/lib/xray/xray_riscv.cpp
-@@ -0,0 +1,296 @@
+@@ -0,0 +1,299 @@
 +//===-- xray_riscv.cpp ----------------------------------------*- C++ -*-===//
 +//
 +// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -230,7 +230,10 @@ index 000000000000..1ed3e0cf9ce4
 +    uint32_t HigherTracingHookAddr =
 +        ((reinterpret_cast<int64_t>(TracingHook) + 0x80000000) >> 32) & 0xfff;
 +    uint32_t HighestTracingHookAddr =
-+        ((((reinterpret_cast<int64_t>(TracingHook) + 0x80000000) >> 32) + 0x800) >> 12) & 0xfffff;
++        ((((reinterpret_cast<int64_t>(TracingHook) + 0x80000000) >> 32) +
++          0x800) >>
++         12) &
++        0xfffff;
 +    // We typecast the Tracing Hook to a 32 bit value for RISCV32
 +#elif defined(__riscv) && (__riscv_xlen == 32)
 +    uint32_t LoTracingHookAddr = reinterpret_cast<int32_t>(TracingHook) & 0xfff;
@@ -666,7 +669,7 @@ index b66429d8a5bf..4b8f721cec43 100644
        InstrumentationOptions op;
        op.HandleTailcall = false;
 diff --git a/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp b/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
-index 9fed6e7baadc..4ce3e2042e8d 100644
+index 9fed6e7baadc..217ec4a537d3 100644
 --- a/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
 +++ b/llvm/lib/Target/RISCV/RISCVAsmPrinter.cpp
 @@ -15,6 +15,7 @@
@@ -709,24 +712,16 @@ index 9fed6e7baadc..4ce3e2042e8d 100644
  };
  }
  
-@@ -92,6 +102,38 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
+@@ -92,6 +102,30 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
    if (emitPseudoExpansionLowering(*OutStreamer, MI))
      return;
  
-+  // Handle XRay sleds while keeping changes minimal to avoid breaking
-+  // functionality
 +  switch (MI->getOpcode()) {
 +  case TargetOpcode::PATCHABLE_FUNCTION_ENTER: {
++    // This switch case section is only for handling XRay sleds.
++    //
 +    // patchable-function-entry is handled in lowerRISCVMachineInstrToMCInst
 +    // Therefore, we break out of the switch statement if we encounter it here.
-+    //
-+    // This switch case section is only for patching XRay sleds, though it could
-+    // handle cases covered by the aforementioned lowerRISCVMachineInstrtoMCInst
-+    // function, though that would require changes to both files, and possibly
-+    // RISCV.h.
-+    //
-+    // XRay could be handled within the lowerRISCVMachineInstrtoMCInst function,
-+    // but that will require significant changes to be made.
 +    const Function &F = MI->getParent()->getParent()->getFunction();
 +    if (F.hasFnAttribute("patchable-function-entry")) {
 +      break;
@@ -748,7 +743,7 @@ index 9fed6e7baadc..4ce3e2042e8d 100644
    MCInst TmpInst;
    if (!lowerRISCVMachineInstrToMCInst(MI, TmpInst, *this))
      EmitToStreamer(*OutStreamer, TmpInst);
-@@ -174,9 +216,24 @@ bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
+@@ -174,9 +208,24 @@ bool RISCVAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
  
    SetupMachineFunction(MF);
    emitFunctionBody();
@@ -773,7 +768,7 @@ index 9fed6e7baadc..4ce3e2042e8d 100644
  void RISCVAsmPrinter::emitStartOfAsmFile(Module &M) {
    if (TM.getTargetTriple().isOSBinFormatELF())
      emitAttributes();
-@@ -196,6 +253,48 @@ void RISCVAsmPrinter::emitAttributes() {
+@@ -196,6 +245,48 @@ void RISCVAsmPrinter::emitAttributes() {
    RTS.emitTargetAttributes(*STI);
  }
  
