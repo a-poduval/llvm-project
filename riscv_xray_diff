@@ -71,10 +71,10 @@ index 73e67618c9d5..2ba2504e6fe2 100644
  #endif /* CPU architecture */
 diff --git a/compiler-rt/lib/xray/xray_riscv.cpp b/compiler-rt/lib/xray/xray_riscv.cpp
 new file mode 100644
-index 000000000000..30430cabc50c
+index 000000000000..50f3a5581f59
 --- /dev/null
 +++ b/compiler-rt/lib/xray/xray_riscv.cpp
-@@ -0,0 +1,299 @@
+@@ -0,0 +1,296 @@
 +//===-- xray_riscv.cpp ----------------------------------------*- C++ -*-===//
 +//
 +// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -226,19 +226,16 @@ index 000000000000..30430cabc50c
 +#if SANITIZER_RISCV64
 +    uint32_t LoTracingHookAddr = reinterpret_cast<int64_t>(TracingHook) & 0xfff;
 +    uint32_t HiTracingHookAddr =
-+        (reinterpret_cast<int64_t>(TracingHook + 0x800) >> 12) & 0xfffff;
++        ((reinterpret_cast<int64_t>(TracingHook) + 0x800) >> 12) & 0xfffff;
 +    uint32_t HigherTracingHookAddr =
-+        (reinterpret_cast<int64_t>(TracingHook + 0x80000000) >> 32) & 0xfff;
++        (((reinterpret_cast<int64_t>(TracingHook) + 0x80000000) >> 32) & 0xfff;
 +    uint32_t HighestTracingHookAddr =
-+        (reinterpret_cast<int64_t>(((TracingHook + 0x80000000) >> 32) +
-+                                   0x800) >>
-+         12) &
-+        0xfffff;
++        ((((reinterpret_cast<int64_t>(TracingHook) + 0x80000000) >> 32) + 0x800) >> 12) & 0xfffff;
 +    // We typecast the Tracing Hook to a 32 bit value for RISCV32
 +#elif defined(__riscv) && (__riscv_xlen == 32)
 +    uint32_t LoTracingHookAddr = reinterpret_cast<int32_t>(TracingHook) & 0xfff;
 +    uint32_t HiTracingHookAddr =
-+        (reinterpret_cast<int32_t>(TracingHook + 0x800) >> 12) & 0xfffff;
++        ((reinterpret_cast<int32_t>(TracingHook) + 0x800) >> 12) & 0xfffff;
 +#endif
 +    uint32_t LoFunctionID = FuncId & 0xfff;
 +    uint32_t HiFunctionID = ((FuncId + 0x800) >> 12) & 0xfffff;
