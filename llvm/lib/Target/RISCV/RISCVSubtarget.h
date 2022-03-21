@@ -143,6 +143,11 @@ public:
   unsigned getMaxInterleaveFactor() const {
     return hasVInstructions() ? MaxInterleaveFactor : 1;
   }
+  // Add XRay support - needs double precision floats at present and does not
+  // support compressed instructions
+  bool isXRaySupported() const override {
+    return hasStdExtD() && !hasStdExtC();
+  }
 
 protected:
   // GlobalISel related APIs.
