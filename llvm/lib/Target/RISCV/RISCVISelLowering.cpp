@@ -8099,6 +8099,8 @@ RISCVTargetLowering::EmitInstrWithCustomInserter(MachineInstr &MI,
     return emitBuildPairF64Pseudo(MI, BB);
   case RISCV::SplitF64Pseudo:
     return emitSplitF64Pseudo(MI, BB);
+  case TargetOpcode::PATCHABLE_EVENT_CALL:
+    return BB;
   }
 }
 

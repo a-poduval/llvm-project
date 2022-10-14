@@ -284,6 +284,42 @@ bool patchFunctionTailExit(const bool Enable, const uint32_t FuncId,
 bool patchCustomEvent(const bool Enable, const uint32_t FuncId,
                       const XRaySledEntry &Sled) XRAY_NEVER_INSTRUMENT {
   // FIXME: Implement for riscv?
+  // When |Enable| == true,
+  // We replace the following compile-time stub (sled):
+  //
+  // xray_sled_n:
+  //    J .tmpN
+  //    ...
+  //    .tmpN
+  //
+  // With one of the following runtime patches:
+  //
+  // xray_sled_n:
+  //    NOP
+  // ...
+  // Replacement of the first 4-byte instruction should be the last and atomic
+  // operation, so that the user code which reaches the sled concurrently
+  // either jumps over the whole sled, or executes the whole sled when the
+  // latter is ready.
+  //
+  // Custom event sleds are 10 instructions long.
+  // Thus, when |Enable|==false, we set back the first instruction in the sled to be
+  //   J 40 bytes
+
+  uint32_t *Address = reinterpret_cast<uint32_t *>(Sled.address());
+  if (Enable) {
+    uint32_t CreateNOP = encodeITypeInstruction(
+    PatchOpcodes::PO_ADDI, RegNum::RN_R0, RegNum::RN_R0, 0);
+    std::atomic_store_explicit(
+        reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateNOP,
+        std::memory_order_release);
+  } else {
+    uint32_t CreateJump = encodeJTypeInstruction(
+        PatchOpcodes::PO_J, RegNum::RN_R0, 0x014); // 20*2 = 40 byte jump
+    std::atomic_store_explicit(
+        reinterpret_cast<std::atomic<uint32_t> *>(Address), CreateJump,
+        std::memory_order_release);
+  }
   return false;
 }
 

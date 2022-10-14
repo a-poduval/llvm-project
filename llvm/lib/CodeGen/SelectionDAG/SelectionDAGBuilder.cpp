@@ -6949,7 +6949,9 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
     // specific calling convention, and only for x86_64.
     // FIXME: Support other platforms later.
     const auto &Triple = DAG.getTarget().getTargetTriple();
-    if (Triple.getArch() != Triple::x86_64)
+    // if (Triple.getArch() != Triple::x86_64)
+    // Add RISCV64 support
+    if ((Triple.getArch() != Triple::x86_64) && (Triple.getArch() != Triple::riscv64))
       return;
 
     SmallVector<SDValue, 8> Ops;

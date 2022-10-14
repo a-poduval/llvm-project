@@ -901,7 +901,9 @@ bool FastISel::selectPatchpoint(const CallInst *I) {
 
 bool FastISel::selectXRayCustomEvent(const CallInst *I) {
   const auto &Triple = TM.getTargetTriple();
-  if (Triple.getArch() != Triple::x86_64 || !Triple.isOSLinux())
+  // if (Triple.getArch() != Triple::x86_64 || !Triple.isOSLinux())
+  // Add RISCV64
+  if (((Triple.getArch() != Triple::x86_64) && (Triple.getArch() != Triple::riscv64)) || !Triple.isOSLinux())
     return true; // don't do anything to this instruction.
   SmallVector<MachineOperand, 8> Ops;
   Ops.push_back(MachineOperand::CreateReg(getRegForValue(I->getArgOperand(0)),

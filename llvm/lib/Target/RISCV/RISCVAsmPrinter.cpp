@@ -72,6 +72,7 @@ public:
   void LowerPATCHABLE_FUNCTION_ENTER(const MachineInstr *MI);
   void LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr *MI);
   void LowerPATCHABLE_TAIL_CALL(const MachineInstr *MI);
+  void LowerPATCHABLE_EVENT_CALL(const MachineInstr *MI);
 
   void emitStartOfAsmFile(Module &M) override;
   void emitEndOfAsmFile(Module &M) override;
@@ -122,6 +123,10 @@ void RISCVAsmPrinter::emitInstruction(const MachineInstr *MI) {
   }
   case TargetOpcode::PATCHABLE_TAIL_CALL: {
     LowerPATCHABLE_TAIL_CALL(MI);
+    return;
+  }
+  case TargetOpcode::PATCHABLE_EVENT_CALL: {
+    LowerPATCHABLE_EVENT_CALL(MI);
     return;
   }
   }
@@ -224,6 +229,149 @@ void RISCVAsmPrinter::LowerPATCHABLE_FUNCTION_EXIT(const MachineInstr *MI) {
 
 void RISCVAsmPrinter::LowerPATCHABLE_TAIL_CALL(const MachineInstr *MI) {
   emitSled(MI, SledKind::TAIL_CALL);
+}
+
+void RISCVAsmPrinter::LowerPATCHABLE_EVENT_CALL(const MachineInstr *MI) {
+  assert(Subtarget->is64Bit() && "XRay custom events only supports RISCV64");
+
+  // We want to emit the following pattern, which follows the x86 calling
+  // convention to prepare for the trampoline call to be patched in.
+  //
+  //   .p2align 1, ...
+  // .Lxray_event_sled_N:
+  //   jmp .tmpN                     // jump across the instrumentation sled
+  //   ...                           // set up arguments in register
+  //   jalr __xray_CustomEvent@plt   // force dependency to symbol
+  //   ...
+  //   <jump here>
+  //
+  // After patching, it would look something like:
+  //
+  //   nopw (2-byte nop)
+  //   ...
+  //   jalr __xrayCustomEvent   // already lowered
+  //   ...
+  //
+  // ---
+  // First we emit the label and the jump.
+  OutStreamer->emitCodeAlignment(4, &getSubtargetInfo());
+  auto CurSled = OutContext.createTempSymbol("xray_event_sled_", true);
+  OutStreamer->AddComment("# XRay Custom Event Log");
+  OutStreamer->emitLabel(CurSled);
+  auto Target = OutContext.createTempSymbol();
+
+  const MCExpr *TargetExpr = MCSymbolRefExpr::create(
+        Target, MCSymbolRefExpr::VariantKind::VK_None, OutContext);
+
+  // Emit "J .tmpN" instruction, which jumps over the sled to the actual
+  // start of function.
+  EmitToStreamer(
+    *OutStreamer,
+    MCInstBuilder(RISCV::JAL).addReg(RISCV::X0).addExpr(TargetExpr));
+
+  // The default C calling convention will place two arguments into A0 and
+  // A1 -- so we only work with those.
+  const Register DestRegs[] = {RISCV::X10, RISCV::X11};
+  bool UsedMask[] = {false, false};
+  // Filled out in loop.
+  Register SrcRegs[] = {0, 0};
+  long int UsedCnt = 0;        // Keep track of number of values that must be pushed to stack
+  long int StackPosition = 0;  // Keep track of stack position when saving to stack
+
+  // Then we put the operands in the A0 and A1 registers. We spill the
+  // values in the register before we clobber them, and mark them as used in
+  // UsedMask. In case the arguments are already in the correct register, we use
+  // emit nops appropriately sized to keep the sled the same size in every
+  // situation.
+  for (unsigned I = 0; I < MI->getNumOperands(); ++I) {
+    auto Op = MI->getOperand(I);
+    assert(Op.isReg() && "Only support arguments in registers");
+    SrcRegs[I] = Op.getReg();
+    if (SrcRegs[I] != DestRegs[I]) {
+      UsedMask[I] = true;
+      UsedCnt++;
+    }
+  }
+
+  // Increment stack counter accordingly
+  // FIXME: We should add 4 or 8 depending on whether we're using riscv32 or riscv64
+  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
+                                   .addReg(RISCV::X2)
+                                   .addReg(RISCV::X2)
+                                   .addImm(-(UsedCnt * 8)));
+
+  StackPosition = UsedCnt;
+  for (unsigned I = 0; I < MI->getNumOperands(); ++I)
+    if (SrcRegs[I] != DestRegs[I]) {
+      EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::SD)
+                                       .addReg(DestRegs[I])
+                                       .addReg(RISCV::X2)
+                                       .addImm(((/*no of used regs*/ StackPosition) - 1) * 8));
+      StackPosition -= 1;
+    } else {
+      // Emit 2 NOPS
+      // 1 corresponsing to pushing the value to stack
+      // 1 corresponding to moving the value to the destination register
+      EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
+                                       .addReg(RISCV::X0)
+                                       .addReg(RISCV::X0)
+                                       .addImm(0));
+      EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
+                                       .addReg(RISCV::X0)
+                                       .addReg(RISCV::X0)
+                                       .addImm(0));
+    }
+
+  // Now that the register values are stashed, mov arguments into place.
+  // FIXME: This doesn't work if one of the later SrcRegs is equal to an
+  // earlier DestReg. We will have already overwritten over the register before
+  // we can copy from it.
+  for (unsigned I = 0; I < MI->getNumOperands(); ++I)
+    if (SrcRegs[I] != DestRegs[I])
+      EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
+                                       .addReg(DestRegs[I])
+                                       .addReg(SrcRegs[I])
+                                       .addImm(0));
+
+  // We emit a hard dependency on the __xray_CustomEvent symbol, which is the
+  // name of the trampoline to be implemented by the XRay runtime.
+  auto TSym = OutContext.getOrCreateSymbol("__xray_CustomEvent");
+  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::JAL)
+                                   .addReg(RISCV::X1)
+                                   .addExpr(MCSymbolRefExpr::create(TSym, OutContext))); //Will this work???
+
+  StackPosition = 0;  // Keep track of stack position when restoring from stack
+
+  for (unsigned I = sizeof UsedMask; I-- > 0;)
+    if (UsedMask[I]) {
+      // Emit a load from stack to destregs[i].
+      EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::LD)
+                                       .addReg(DestRegs[I])
+                                       .addReg(RISCV::X2)
+                                       .addImm(StackPosition * 8));
+      StackPosition += 1;
+  }
+    else
+    // Emit a nop
+    EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
+                                     .addReg(RISCV::X0)
+                                     .addReg(RISCV::X0)
+                                     .addImm(0));
+
+  // Add number of UsedRegs * 8 to sp. If no registers were used, then we essentially add a nop.
+  EmitToStreamer(*OutStreamer, MCInstBuilder(RISCV::ADDI)
+                                   .addReg(RISCV::X2)
+                                   .addReg(RISCV::X2)
+                                   .addImm(UsedCnt * 8));    // We can add a reg size check
+  // It will be 4 for 32 bit, 8 for 64 bit
+
+  OutStreamer->AddComment("xray custom event end.");
+
+  // Record the sled version. Version 0 of this sled was spelled differently, so
+  // we let the runtime handle the different offsets we're using. Version 2
+  // changed the absolute address to a PC-relative address.
+  OutStreamer->emitLabel(Target);
+  recordSled(CurSled, *MI, SledKind::CUSTOM_EVENT, 2);
 }
 
 void RISCVAsmPrinter::emitStartOfAsmFile(Module &M) {
