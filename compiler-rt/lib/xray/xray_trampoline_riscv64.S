@@ -12,6 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "../builtins/assembly.h"
+
 	.text
 	.file "xray_trampoline_riscv64.S"
 	.globl __xray_FunctionEntry
@@ -123,6 +125,10 @@ FunctionExit_end:
 	.size __xray_FunctionExit, FunctionExit_end-__xray_FunctionExit
 	.cfi_endproc
 
+       .text
+       .globl __xray_CustomEvent
+       .p2align 2
+       .type __xray_CustomEvent,@function
 __xray_CustomEvent:
        .cfi_startproc
        // Push argument registers to stack
