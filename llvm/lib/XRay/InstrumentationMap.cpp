@@ -62,7 +62,8 @@ loadObj(StringRef Filename, object::OwningBinary<object::ObjectFile> &ObjFile,
       !(ObjFile.getBinary()->getArch() == Triple::x86_64 ||
         ObjFile.getBinary()->getArch() == Triple::ppc64le ||
         ObjFile.getBinary()->getArch() == Triple::arm ||
-        ObjFile.getBinary()->getArch() == Triple::aarch64))
+        ObjFile.getBinary()->getArch() == Triple::aarch64 ||
+        ObjFile.getBinary()->getArch() == Triple::riscv64))
     return make_error<StringError>(
         "File format not supported (only does ELF and Mach-O little endian "
         "64-bit).",
@@ -123,6 +124,13 @@ loadObj(StringRef Filename, object::OwningBinary<object::ObjectFile> &ObjFile,
                 {Reloc.getOffset(),
                  object::resolveRelocation(Resolver, Reloc, *ValueOrErr, 0)});
           }
+        } else if ((Supports && Supports(Reloc.getType())) && (ObjFile.getBinary()->getArch() == Triple::riscv64)) {
+          auto AddendOrErr = object::ELFRelocationRef(Reloc).getAddend();
+          auto A = AddendOrErr ? *AddendOrErr : 0;
+          Expected<uint64_t> ValueOrErr = Reloc.getSymbol()->getValue();
+          Relocs.insert(
+              {Reloc.getOffset(),
+               object::resolveRelocation(Resolver, Reloc, *ValueOrErr, A)});
         } else if (Supports && Supports(Reloc.getType())) {
           auto AddendOrErr = object::ELFRelocationRef(Reloc).getAddend();
           auto A = AddendOrErr ? *AddendOrErr : 0;
